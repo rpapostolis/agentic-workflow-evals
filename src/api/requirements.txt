@@ -1,0 +1,19 @@
+# Core web framework
+fastapi==0.115.0
+uvicorn==0.35.0
+
+# MCP support
+fastmcp>=2.13.0
+
+# Local database
+aiosqlite>=0.20.0
+
+# OpenAI-compatible client (works with Ollama, vLLM, etc.)
+openai==2.4.0
+
+# Utilities
+python-dotenv>=1.1.0
+pydantic==2.12.2
+pydantic-settings==2.6.1
+httpx==0.28.1
+requests==2.32.5

@@ -1,0 +1,73 @@
+# =============================================================================
+# Ollama Modelfile — qwen3-vl:8b for browser automation on M4 Pro 48GB
+#
+# This is the SINGLE SOURCE OF TRUTH for all model parameters.
+# The agent code does NOT override these — it sends only model + messages.
+#
+# Build:  ollama create cua-agent -f src/agents/computer_use/Modelfile
+# Run:    ollama run cua-agent
+# Delete: ollama rm cua-agent
+# =============================================================================
+
+FROM qwen3-vl:8b
+
+# ── Context & generation ────────────────────────────────────────────────────
+# Vision models need large context: screenshot alone = ~1500-2500 tokens via
+# the ViT encoder, plus system prompt (~300), page text (~500), conversation
+# history, and output.  8192 is comfortable for the 8B model on 48GB.
+PARAMETER num_ctx 8192
+# num_predict must cover thinking tokens + JSON output.
+# qwen3-vl:8b thinking can consume 4000+ tokens before producing any content.
+# At 1024, done_reason=length caused empty-content failures on complex pages.
+# 8192 gives the model room to finish thinking and still output the JSON action.
+PARAMETER num_predict 8192
+
+# ── Sampling — deterministic agent behavior ─────────────────────────────────
+# Low temperature + tight top_k for consistent JSON output.
+# The agent should pick the single best action, not be creative.
+PARAMETER temperature 0.1
+PARAMETER top_k 20
+PARAMETER top_p 0.8
+
+# ── Repetition penalty ─────────────────────────────────────────────────────
+# Gently discourage the model from repeating the same tokens/phrases,
+# which helps avoid stuck loops (scrolling, clicking same element).
+# 1.05 is the Qwen3 recommended value.  Don't go above 1.2.
+PARAMETER repeat_penalty 1.05
+
+# ── Hardware tuning for M4 Pro (10P+4E cores, 20 GPU cores, 48GB) ──────────
+# num_gpu 99 = offload ALL layers to Metal GPU (model is ~6GB, fits easily)
+# num_thread = performance cores only (E-cores add overhead for LLM inference)
+PARAMETER num_gpu 99
+PARAMETER num_thread 10
+
+# ── Keep system prompt pinned in context ────────────────────────────────────
+# When context slides, preserve the first 512 tokens (system prompt + task).
+# Without this, long conversations lose the action format instructions.
+PARAMETER num_keep 512
+
+# ── Disable thinking mode ────────────────────────────────────────────────────
+# qwen3-vl has a "thinking" mode that produces <think>…</think> blocks.
+# Two layers of suppression are used here:
+#
+# 1. /no_think directive in each user turn — asks the model to skip thinking.
+#
+# 2. Empty <think></think> prefix on the assistant turn — pre-fills the think
+#    block so the model believes thinking is already done and goes straight to
+#    the JSON response.  This is more reliable than the directive alone because
+#    qwen3-vl sometimes ignores /no_think on complex visual inputs (logs showed
+#    thinking=4000+ chars consuming the entire num_predict budget).
+#
+# The API-level `think=false` option is NOT used — it has known bugs where
+# thinking leaks into the content field without <think> tags, breaking parsing.
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ range .Messages }}{{ if eq .Role "user" }}<|im_start|>user
+{{ .Content }} /no_think<|im_end|>
+{{ else if eq .Role "assistant" }}<|im_start|>assistant
+{{ .Content }}<|im_end|>
+{{ end }}{{ end }}<|im_start|>assistant
+<think>
+
+</think>
+"""

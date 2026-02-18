@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgentEval — THE EVALUATION LOOP</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+    <link rel="apple-touch-icon" href="/images/agenteval.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="/src/main.css" rel="stylesheet" />
+</head>
+
+<body>
+    <script>
+      // Prevent flash: apply saved theme before React loads
+      try {
+        var t = localStorage.getItem('agenteval_theme');
+        if (t === 'light') document.documentElement.classList.remove('dark');
+        else if (t === 'system' && !window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.remove('dark');
+      } catch(e) {}
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>

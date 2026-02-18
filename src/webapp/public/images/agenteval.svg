@@ -1,0 +1,31 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="512" height="512" rx="108" fill="#0d1117"/>
+  <rect x="2" y="2" width="508" height="508" rx="106" stroke="#30363d" stroke-width="4"/>
+
+  <!-- Outer eval loop ring -->
+  <circle cx="256" cy="256" r="155" stroke="url(#ring)" stroke-width="18" stroke-linecap="round" stroke-dasharray="680 300" fill="none" transform="rotate(-45 256 256)"/>
+
+  <!-- Loop arrow head (top-right) -->
+  <path d="M370 138 L395 118 L385 155" fill="none" stroke="#3fb950" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Center checkmark -->
+  <path d="M200 262 L240 302 L320 210" fill="none" stroke="url(#check)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Small pulse dots around the ring -->
+  <circle cx="256" cy="96" r="8" fill="#58a6ff" opacity="0.6"/>
+  <circle cx="416" cy="256" r="8" fill="#bc8cff" opacity="0.6"/>
+  <circle cx="256" cy="416" r="8" fill="#3fb950" opacity="0.6"/>
+
+  <defs>
+    <linearGradient id="ring" x1="100" y1="100" x2="412" y2="412" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#58a6ff"/>
+      <stop offset="50%" stop-color="#bc8cff"/>
+      <stop offset="100%" stop-color="#3fb950"/>
+    </linearGradient>
+    <linearGradient id="check" x1="200" y1="210" x2="320" y2="302" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#58a6ff"/>
+      <stop offset="100%" stop-color="#3fb950"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentEval — The Evaluation Loop</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --accent: rgba(48,54,61,0.5);
+    --blue: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --orange: #f0883e;
+    --yellow: #d29922;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .page {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 48px 72px;
+  }
+
+  /* ── Hero ── */
+  .hero-label {
+    font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--blue); margin-bottom: 14px;
+  }
+  .hero h1 {
+    font-size: 36px; font-weight: 700; line-height: 1.15; margin-bottom: 18px;
+  }
+  .hero p { font-size: 15px; line-height: 1.7; color: var(--muted); }
+
+  /* ── Lifecycle Layout ── */
+  .lifecycle-layout {
+    display: flex; gap: 40px; align-items: flex-start;
+  }
+  .lifecycle-left {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 28px; flex-shrink: 0; width: 280px;
+  }
+
+  /* ── Step List ── */
+  .step-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; border-radius: 10px;
+    border: 1px solid transparent; background: transparent;
+    cursor: pointer; text-align: left; width: 100%;
+    transition: all 0.2s ease; font-family: inherit;
+  }
+  .step-item:hover { background: rgba(88,166,255,0.04); }
+  .step-item.active { border-color: var(--step-accent, var(--blue)); }
+  .step-item .step-cat {
+    font-size: 10px; font-weight: 600; letter-spacing: 1.5px;
+    text-transform: uppercase; margin-bottom: 2px;
+  }
+  .step-item .step-title { font-size: 14px; font-weight: 500; color: var(--muted); }
+  .step-item.active .step-title { font-weight: 600; color: var(--fg); }
+  .step-item .step-icon {
+    font-size: 14px; width: 18px; text-align: center; flex-shrink: 0;
+  }
+
+  /* ── Detail Panel ── */
+  .detail-panel {
+    flex: 1; background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 32px 36px;
+    display: flex; flex-direction: column; gap: 24px;
+    animation: fadeInUp 0.3s ease;
+  }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .detail-panel .label {
+    font-size: 11px; font-weight: 700; letter-spacing: 1.8px;
+    text-transform: uppercase;
+  }
+  .detail-panel h2 {
+    font-size: 28px; font-weight: 700; line-height: 1.2;
+  }
+  .detail-panel .body-text {
+    font-size: 14px; line-height: 1.7; color: var(--muted);
+  }
+  .detail-panel .section-box {
+    border-radius: 10px; padding: 16px 20px;
+  }
+  .detail-panel .mechanic-item {
+    display: flex; gap: 10px; align-items: flex-start;
+  }
+  .detail-panel .mechanic-dot {
+    width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; margin-top: 7px;
+  }
+  .detail-panel .example-box {
+    border-radius: 10px; padding: 14px 20px;
+  }
+  .detail-panel .mono {
+    font-size: 13px; line-height: 1.65; color: var(--muted);
+    font-family: 'SF Mono', 'Fira Code', monospace; white-space: pre-wrap;
+  }
+  .detail-panel .pitfall-box {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 12px 16px; border-radius: 8px;
+  }
+
+  /* ── Principles Grid ── */
+  .principles-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .principle-card {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 14px; border-radius: 8px;
+  }
+  .principle-icon {
+    width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0; margin-top: 1px;
+    display: flex; align-items: center; justify-content: center; font-size: 11px;
+  }
+  .principle-title { font-size: 13px; font-weight: 600; color: var(--fg); margin-bottom: 2px; }
+  .principle-body { font-size: 12px; line-height: 1.5; color: var(--muted); }
+
+  /* SVG cursor */
+  .svg-step { cursor: pointer; }
+  .svg-step:hover circle:first-child { opacity: 0.15 !important; }
+
+  /* ── Responsive ── */
+  @media (max-width: 900px) {
+    .page { padding: 32px 20px; }
+    .lifecycle-layout { flex-direction: column; align-items: center; }
+    .lifecycle-left { width: 100%; align-items: center; }
+    .principles-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="hero" style="margin-bottom: 48px;">
+    <div class="hero-label">THE EVALUATION LOOP</div>
+    <h1>
+      <span style="color: var(--purple)">Hope</span> won't fix your Agents —
+      <span style="color: var(--green)">Evals Loops</span> will.
+    </h1>
+    <p>
+      AI agents fail in unpredictable ways. They call the wrong tools, misparse dates, hallucinate
+      parameters, and produce plausible-sounding answers that are silently wrong. The only way to catch
+      these failures systematically is to evaluate — define what correct behavior looks like, measure
+      your agent against it, and iterate until the gap closes. That is the evaluation loop.
+    </p>
+  </div>
+
+  <div class="lifecycle-layout">
+    <div class="lifecycle-left">
+      <svg id="circular-diagram" width="280" height="280" viewBox="0 0 280 280" style="flex-shrink:0"></svg>
+      <div id="step-list" style="display: flex; flex-direction: column; gap: 2px; width: 100%;"></div>
+    </div>
+    <div id="detail-panel" class="detail-panel"></div>
+  </div>
+</div>
+
+<script>
+const STEPS = [
+  {
+    id: "philosophy", number: 0, category: "UNDERSTAND", title: "The Philosophy",
+    iconChar: "\u2605", accentColor: "#bc8cff",
+    description: "Building reliable AI agents requires a fundamentally different approach than traditional software development. You can\u2019t write unit tests for non-deterministic systems the same way you test deterministic code. Eval-driven development bridges this gap \u2014 instead of hoping your prompt is good enough, you define what \u201ccorrect\u201d means, measure your agent against it, and iterate until the gap closes.",
+    whyItMatters: "Most teams build AI agents by writing a prompt, trying a few examples manually, and shipping. This works until it doesn\u2019t \u2014 and when it breaks, you have no systematic way to diagnose or fix the problem. Eval-driven development gives you a feedback loop: every failure becomes a signal, every iteration is measurable, and every improvement is verifiable. Teams that adopt this approach typically reach 80%+ pass rates within 3\u20135 iterations, whereas ad hoc prompting plateaus around 50\u201360%.",
+    mechanics: [
+      "Define behavioral contracts (not string-matching tests) \u2014 assert on tool calls, argument values, and semantic response quality",
+      "Automate the judge: an LLM evaluates each assertion with chain-of-thought reasoning, catching semantic equivalences that brittle tests miss",
+      "Measure every change: every prompt edit gets a before/after comparison with per-test deltas",
+      "Guard against regression: holdout test cases detect overfitting, comparison views catch silent breakage",
+    ],
+    example: "Traditional approach: tweak prompt \u2192 manually test 2\u20133 inputs \u2192 ship and hope.\nEval-driven approach: tweak prompt \u2192 run 7+ tests automatically \u2192 see 57% \u2192 read failures \u2192 apply targeted fix \u2192 re-run \u2192 see 85% \u2192 verify no regressions \u2192 ship with confidence.",
+    pitfall: "Don\u2019t skip the philosophy and jump straight into mechanics. Understanding why you evaluate \u2014 not just how \u2014 is what separates teams that build reliable agents from teams that fight the same bugs forever.",
+    principles: [
+      { icon: "\u2295", title: "Test Behavior, Not Output", color: "#58a6ff",
+        body: "Traditional testing asks \u201cis the response correct?\u201d \u2014 eval-driven development asks \u201cdid the agent take the right actions with the right parameters?\u201d By testing tool calls and arguments, you catch the actual decision-making process, not just whether the final sentence sounds good." },
+      { icon: "\u21bb", title: "Iterate, Don\u2019t Guess", color: "#3fb950",
+        body: "Prompt engineering by intuition hits a ceiling fast. The eval loop replaces guesswork with measurement: run evaluation, read the failures, apply a targeted fix, measure again. Each cycle gives you a clear signal." },
+      { icon: "\u26e8", title: "Guard Against Regression", color: "#f85149",
+        body: "Every prompt change is a risk. A fix that makes 3 tests pass might silently break 2 others. The comparison view catches this immediately \u2014 you see exactly which tests improved, which regressed, and which held steady." },
+      { icon: "\u2726", title: "Let Failures Drive Improvements", color: "#f0883e",
+        body: "Failures aren\u2019t problems \u2014 they\u2019re the most valuable signal in your pipeline. Each one tells you something specific about how your agent misunderstands its instructions. The Prompt Lab turns these signals into concrete, targeted prompt changes." },
+    ],
+  },
+  {
+    id: "create", number: 1, category: "REGISTER", title: "Register Agent",
+    iconChar: "\u26a1", accentColor: "#58a6ff",
+    description: "Connect your AI agent to the evaluation framework by registering its HTTP endpoint. The evaluator needs to know where to send test inputs and how to interpret responses. This is the foundation of every eval loop \u2014 without a registered agent, there is nothing to test.",
+    whyItMatters: "A well-defined agent registration decouples the evaluation framework from your agent\u2019s implementation. It doesn\u2019t matter if your agent uses GPT-4, Claude, a local model, or a rule-based system \u2014 as long as it speaks HTTP, the evaluator can test it. This means you can swap models, change architectures, and refactor freely, while your test suite remains stable.",
+    mechanics: [
+      "Define agent name, endpoint URL, and model type for tracking",
+      "Configure timeout (how long to wait for each response) and concurrency",
+      "The agent receives test inputs as JSON via HTTP POST and returns structured responses with tool calls",
+      "Multiple agents can be registered and compared on the same test suite",
+    ],
+    example: "The CU Agent is auto-registered at http://localhost:8001/invoke, model cua-agent (qwen3-vl:8b tuned via Modelfile), timeout 600s. The evaluator will POST {\"input\": \"Go to wikipedia.org and find the population of Tokyo...\"} and the agent drives a real browser to complete the task.",
+    pitfall: "Don\u2019t skip configuring the timeout. Browser automation agents need long timeouts (5\u201310 min) \u2014 multi-step web tasks are slow, and a 30s default will cause false failures.",
+  },
+  {
+    id: "define", number: 2, category: "DEFINE", title: "Add Test Cases",
+    iconChar: "\u25c9", accentColor: "#bc8cff",
+    description: "Build a dataset of behavioral contracts. Each test case is a specification: given this input, the agent should call these tools with these arguments, and the final response should meet these criteria. Think of test cases as executable requirements \u2014 they define what \u201ccorrect\u201d means for your agent.",
+    whyItMatters: "The quality of your evaluations is determined entirely by the quality of your test cases. Vague tests give vague results. The most effective test suites encode real user scenarios with precise assertions \u2014 not just \u201cdid the agent respond?\u201d but \u201cdid it call the right tool with the right date in the right format?\u201d This specificity is what turns evaluations from a vanity metric into an actionable feedback signal.",
+    mechanics: [
+      "Each test case starts with an input prompt \u2014 a real task for the browser agent (navigate, extract, fill forms)",
+      "Two assertion modes: response_only (just check the answer) and hybrid (behavior assertions + response quality)",
+      "Behavior assertions describe what the agent should do: \u201cAgent navigates to news.ycombinator.com\u201d, \u201cAgent extracts at least 5 story titles\u201d",
+      "The LLM judge evaluates each assertion against the actual tool calls and response with chain-of-thought reasoning",
+      "Mark test cases as holdout to prevent overfitting \u2014 holdout tests are excluded from AI proposal generation",
+    ],
+    example: "3 test cases covering both modes:\n\n1. response_only \u2014 \u201cGo to wikipedia.org and find the population of Tokyo. Return just the number.\u201d\n   Mode auto-detected: no assertions defined, so the judge evaluates the response quality only.\n\n2. hybrid \u2014 \u201cGo to news.ycombinator.com and extract the top 5 story titles.\u201d\n   4 behavior assertions: navigates to HN, reads front page, extracts 5+ titles, returns numbered list.\n\n3. hybrid \u2014 \u201cGo to localhost:5001/datasets and create a new dataset via the UI.\u201d\n   3 behavior assertions: navigates to datasets page, fills in the form fields, submits the form.",
+    pitfall: "Avoid writing assertions that are too loose (\u201cresponse should be helpful\u201d) or too brittle (\u201cresponse must be exactly this string\u201d). Aim for semantic assertions that capture intent \u2014 the LLM judge understands meaning, not just string matching.",
+  },
+  {
+    id: "capture", number: 3, category: "EXPAND", title: "Learn from Production",
+    iconChar: "\u25cb", accentColor: "#bc8cff",
+    description: "Run real tasks against your agent on-demand and capture the full execution trace \u2014 every tool call, every argument, latency, token usage, and the final response. The Run Task feature lets you generate production-grade traces without deploying to production, then annotate them, flag issues, and convert the best ones into test cases that expand your evaluation suite.",
+    whyItMatters: "Manual test case creation has a blind spot: you can only test what you imagine. Running the agent on real tasks reveals behaviors you didn\u2019t anticipate \u2014 unexpected navigation paths, partial extraction, retry loops, timeout edge cases. By annotating these traces and converting them to test cases, you build a suite that reflects actual agent behavior, not just theoretical scenarios. Each converted trace closes a coverage gap.",
+    mechanics: [
+      "Run Task: click the green button on Production Traces, pick an agent, enter natural-language instructions \u2014 the agent executes in a real browser and the full trace is stored automatically",
+      "Trace detail: review input, output, every tool call with arguments, latency, model, and token counts",
+      "Annotate: rate outcome (1\u20135), tag efficiency, flag issues, and mark as test-case candidate",
+      "Convert to Test Case: one click turns an annotated trace into a test case in any dataset \u2014 input maps to instructions, output to expected response",
+      "PII scanning: every trace is automatically scanned for personally identifiable information before storage",
+    ],
+    example: "Run Task: \u201cGo to wikipedia.org and find the population of Japan\u201d. Agent opens browser, navigates, extracts the number \u2014 trace captured in ~90 seconds. You open the trace, see 4 tool calls (navigate, read_page, extract, respond). Annotate: outcome 5/5, efficiency \u201cefficient\u201d. Mark as test-case candidate, convert to your Web Tasks dataset. Next evaluation now includes this real-world scenario.",
+    pitfall: "Don\u2019t only capture failures. Successful runs are equally valuable \u2014 they validate your test coverage matches real usage patterns and establish baseline behavior. A test suite built only from edge cases can miss common-path regressions.",
+  },
+  {
+    id: "execute", number: 4, category: "EXECUTE", title: "Run Evaluation",
+    iconChar: "\u25c6", accentColor: "#3fb950",
+    description: "The evaluator sends each test case to your agent endpoint, captures the full response including every tool call, and then passes each assertion to an LLM judge for scoring. This is the moment of truth \u2014 where your specifications meet your agent\u2019s actual behavior.",
+    whyItMatters: "Automated evaluation eliminates the most painful bottleneck in agent development: manual testing. Instead of clicking through scenarios and eyeballing results, you get a precise, reproducible score in minutes. The LLM judge understands semantic equivalence \u2014 it knows that \u201cMarch 15th\u201d and \u201c2025-03-15\u201d and \u201ctomorrow\u201d can all mean the same date. This semantic judgment is what makes AI evaluation fundamentally more powerful than traditional unit tests for agent behavior.",
+    mechanics: [
+      "Warmup delay prevents race conditions with agent initialization",
+      "Tests execute in parallel with controlled concurrency",
+      "Each test is sent to the agent, then judged by an LLM",
+      "Rate limit handling with automatic retry",
+      "Real-time progress tracking throughout execution",
+    ],
+    example: "3 test cases launch with concurrency 1 (browser agent can only run one session at a time). Each agent call takes 60\u2013180s as the CUA navigates pages, clicks elements, and reads content. The LLM judge then evaluates each assertion at ~5s per check. Total wall time for 3 tests: ~5\u201310 minutes.",
+    pitfall: "Browser automation agents are inherently slow \u2014 each test involves real page loads, rendering, and multi-step navigation. Keep concurrency at 1 for CUA agents (they share a single browser) and set timeouts to 600s to avoid false failures on complex tasks.",
+  },
+  {
+    id: "analyze", number: 5, category: "ANALYZE", title: "Review Results",
+    iconChar: "\u25a3", accentColor: "#d29922",
+    description: "Examine your evaluation results at every level of detail: overall pass rate, per-test breakdown, individual assertion results, and the judge\u2019s reasoning for each decision. The results page is where patterns emerge \u2014 you\u2019ll see which scenarios your agent handles well and where it consistently struggles.",
+    whyItMatters: "Raw pass/fail numbers are just the starting point. The real value is in the failure analysis. When you see that 3 out of 7 tests fail, the question is: why? Is it the same root cause (e.g., the agent always parses dates wrong) or different issues? The results view gives you assertion-level detail so you can trace each failure to its root cause. This diagnosis is what makes the next step \u2014 prompt improvement \u2014 targeted and effective rather than guesswork.",
+    mechanics: [
+      "Overall pass rate with a visual score ring \u2014 green (80%+), amber (50%+), red (<50%)",
+      "Per-test breakdown: expand any test case to see tool calls, arguments, and assertion results",
+      "Assertion-level detail: see the judge\u2019s reasoning for why each check passed or failed",
+      "Execution timing: how long each agent call and judge call took (identifies slow tests)",
+      "Regression detection: if a previously-passing test now fails, it\u2019s flagged automatically",
+    ],
+    example: "33% pass rate (1/3). \u201cWikipedia population\u201d passed \u2014 agent navigated correctly and extracted the number. \u201cHacker News headlines\u201d failed: agent only extracted 3 titles instead of 5 (assertion: \u201cextracts at least 5 story titles\u201d \u2192 FAIL). \u201cCreate dataset via UI\u201d failed: agent clicked the wrong button and never reached the form. Root cause pattern: incomplete extraction (1 test) + UI navigation error (1 test).",
+    pitfall: "Don\u2019t just look at the pass rate. Two evaluations can both show 33% but have completely different failure patterns. Always drill into the individual failures \u2014 the judge\u2019s reasoning tells you exactly what went wrong.",
+  },
+  {
+    id: "annotate", number: 6, category: "ANNOTATE", title: "Review & Label",
+    iconChar: "\u2713", accentColor: "#e3b341",
+    description: "Add the human layer. Automated assertions catch the obvious failures, but some judgments need a human eye. The Annotations page lets you review each test result in detail \u2014 rate the overall outcome, flag specific tool calls as incorrect, and tag recurring issues. This human signal is what makes prompt improvements targeted rather than generic.",
+    whyItMatters: "LLM judges are powerful but imperfect. They can miss subtle failures that a domain expert catches immediately \u2014 like an agent that calls the right tool with technically valid parameters but in the wrong business context. Your annotations capture this expert knowledge. Once you\u2019ve annotated enough results (80%+ coverage), the system auto-triggers AI proposal generation using your human labels as ground truth, producing higher-quality prompt fixes than automated analysis alone.",
+    mechanics: [
+      "Run-level annotations: rate each test result on a 1\u20135 scale (Failed \u2192 Yes) with efficiency tags",
+      "Action-level annotations: drill into individual tool calls to mark correctness, parameter quality, and error contribution",
+      "Issue tagging: flag recurring problems like \u201cwrong tool used\u201d, \u201cbad parameters\u201d, \u201crepeated work\u201d, or \u201cskipped required check\u201d",
+      "Auto-trigger: once annotation coverage exceeds 80%, the system generates prompt improvement proposals informed by your labels",
+      "Export: download annotations as JSON or CSV for offline analysis or team review",
+    ],
+    example: "Test: \u201cExtract top 5 Hacker News titles\u201d. Automated judge: FAIL (only 3 titles). Your annotation: 2/5 \u2014 agent navigated correctly but stopped scrolling too early. Action annotation: read_page_text marked as \u201cpartly correct\u201d with note \u201cextracted titles from visible area only, didn\u2019t scroll to load more\u201d. The scroll action is tagged as \u201cskipped required check\u201d. This nuance feeds directly into the next prompt proposal.",
+    pitfall: "Don\u2019t annotate only the failures. Reviewing passing tests occasionally catches false positives \u2014 cases where the judge said PASS but the agent took an inefficient or fragile path to get there.",
+  },
+  {
+    id: "optimize", number: 7, category: "OPTIMIZE", title: "Improve Prompt",
+    iconChar: "\u2666", accentColor: "#f0883e",
+    description: "The Prompt Lab is where failures become improvements. It analyzes patterns across your evaluation results \u2014 grouping failures by root cause \u2014 and generates AI-powered proposals: specific, concrete changes to your system prompt, each with a confidence score and detailed reasoning.",
+    whyItMatters: "Manual prompt engineering is slow and fragile. You read a few failures, guess at a fix, update the prompt, re-run, and hope for the best. The Prompt Lab automates this cycle: it reads every failure, identifies statistical patterns (\u201c3/7 tests fail on date formatting\u201d), and generates targeted fixes (\u201cAdd: Always use ISO 8601 date format YYYY-MM-DD\u201d). Each proposal comes with a confidence score calibrated on the strength of evidence \u2014 high confidence means the pattern is clear and the fix is well-supported.",
+    mechanics: [
+      "Pattern detection: failures are grouped by root cause \u2014 not surface symptoms",
+      "AI proposals: each proposal is a specific prompt modification with title, reasoning, and confidence (0.0\u20131.0)",
+      "One-click apply: proposals create a new prompt version automatically (version history is preserved)",
+      "Regression safety: applying a proposal triggers a confirmation gate warning that changes can cause regressions",
+      "Deduplication: the system tracks previously generated proposals and avoids suggesting the same fix twice",
+    ],
+    example: "Pattern detected: \u201cIncomplete page reading\u201d (2/3 failures). Proposal: add \u201cAfter navigating to a page, always use read_page_text to capture the full content before extracting information. If the page has dynamic content or requires scrolling, scroll down and read again to ensure nothing is missed.\u201d Confidence: 0.78.",
+    pitfall: "Don\u2019t blindly apply high-confidence proposals. Always run a new evaluation after applying to check for regressions \u2014 a prompt change that fixes extraction tests might make the agent overly cautious on simple navigation tasks.",
+  },
+  {
+    id: "iterate", number: 8, category: "ITERATE", title: "Compare & Repeat",
+    iconChar: "\u25c6", accentColor: "#f85149",
+    description: "Close the loop by comparing your new evaluation against the baseline. The comparison view aligns results test-by-test, showing exactly which cases improved, which regressed, and which stayed the same. Then start the next iteration \u2014 the best agents are built through dozens of these cycles, not a single pass.",
+    whyItMatters: "Without comparison, you\u2019re flying blind. A prompt change might improve your overall pass rate from 57% to 71% \u2014 but did it improve the right tests? Did anything regress? The comparison view answers these questions definitively. Over time, your version history becomes a record of every decision: what you changed, why, and what happened. This institutional memory is invaluable when debugging regressions or onboarding new team members.",
+    mechanics: [
+      "Side-by-side comparison: Baseline (older) vs Latest (newer) with automatic time-based ordering",
+      "Per-test deltas: Improved (was failing, now passes), Regressed (was passing, now fails), Unchanged",
+      "Pass rate delta: the net change in overall score with color coding (green = better, red = worse)",
+      "Holdout monitoring: if you marked holdout test cases, their results are tracked separately to detect overfitting",
+      "Version history: track the trajectory across prompt versions \u2014 see the trendline of improvement",
+    ],
+    example: "Prompt v1 (33.3%) \u2192 Prompt v3 (100%): Wikipedia test unchanged (still passing), HN headlines improved (now extracts all 5), dataset creation improved (correct button targeting). Holdout: 1/1 passing. Net pass rate \u0394: +66.7%.",
+    pitfall: "If you see improvements on training tests but not on holdout tests, your prompt changes may be overfitting to specific test cases rather than genuinely improving behavior.",
+  },
+];
+
+// ── State ──
+let activeStep = 0;
+
+// ── Circular Diagram ──
+function renderDiagram() {
+  const svg = document.getElementById('circular-diagram');
+  const cx = 140, cy = 140, r = 108, nodeR = 20, n = STEPS.length;
+  const pos = STEPS.map((_, i) => {
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+  });
+  let h = '';
+  // Arrows
+  pos.forEach((p, i) => {
+    const nx = pos[(i+1)%n]; const dx = nx.x-p.x, dy = nx.y-p.y;
+    const l = Math.sqrt(dx*dx+dy*dy), ux = dx/l, uy = dy/l;
+    const sx = p.x+ux*(nodeR+4), sy = p.y+uy*(nodeR+4);
+    const ex = nx.x-ux*(nodeR+4), ey = nx.y-uy*(nodeR+4);
+    const mx = (sx+ex)/2, my = (sy+ey)/2, s = 5;
+    h += `<line x1="${sx}" y1="${sy}" x2="${ex}" y2="${ey}" stroke="#30363d" stroke-width="1.5" opacity="0.6"/>`;
+    h += `<polygon points="${mx+ux*s},${my+uy*s} ${mx-uy*s},${my+ux*s} ${mx+uy*s},${my-ux*s}" fill="#30363d" opacity="0.6"/>`;
+  });
+  h += `<text x="${cx}" y="${cy-6}" text-anchor="middle" fill="#8b949e" font-size="8.5" font-weight="600" letter-spacing="2">CONTINUOUS</text>`;
+  h += `<text x="${cx}" y="${cy+8}" text-anchor="middle" fill="#8b949e" font-size="8.5" font-weight="600" letter-spacing="2">IMPROVEMENT</text>`;
+  // Nodes
+  pos.forEach((p, i) => {
+    const st = STEPS[i], act = i === activeStep, ac = st.accentColor;
+    if (act) {
+      h += `<circle cx="${p.x}" cy="${p.y}" r="${nodeR+6}" fill="none" stroke="${ac}" stroke-width="2" opacity="0.3">
+        <animate attributeName="r" values="${nodeR+4};${nodeR+10};${nodeR+4}" dur="2s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.3;0.08;0.3" dur="2s" repeatCount="indefinite"/>
+      </circle>`;
+    }
+    h += `<g class="svg-step" onclick="go(${i})">
+      <circle cx="${p.x}" cy="${p.y}" r="${nodeR}" fill="${act?ac+'18':'#161b22'}" stroke="${act?ac:'#30363d'}" stroke-width="${act?2.5:1.5}"/>
+      <text x="${p.x}" y="${p.y+1}" text-anchor="middle" dominant-baseline="central" fill="${act?ac:'#8b949e'}" font-size="${st.number===0?12:14}" font-weight="600">${st.number===0?'\u2605':st.number}</text>
+    </g>`;
+  });
+  svg.innerHTML = h;
+}
+
+// ── Step List ──
+function renderList() {
+  document.getElementById('step-list').innerHTML = STEPS.map((s, i) => {
+    const act = i === activeStep, ac = s.accentColor;
+    return `<button class="step-item ${act?'active':''}" style="--step-accent:${ac};${act?`background:${ac}0a;`:''}" onclick="go(${i})">
+      <span class="step-icon" style="color:${act?ac:'var(--muted)'}">${s.iconChar}</span>
+      <div>
+        <div class="step-cat" style="color:${act?ac:'var(--muted)'}">${s.number===0?'\u2605':s.number}. ${s.category}</div>
+        <div class="step-title">${s.title}</div>
+      </div>
+    </button>`;
+  }).join('');
+}
+
+// ── Detail Panel ──
+function renderDetail() {
+  const s = STEPS[activeStep], ac = s.accentColor, p = document.getElementById('detail-panel');
+  let h = `<div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+      <div style="width:36px;height:36px;border-radius:9px;background:${ac}15;border:1px solid ${ac}30;display:flex;align-items:center;justify-content:center;font-size:16px;color:${ac};">${s.iconChar}</div>
+      <div class="label" style="color:${ac};font-size:12px;letter-spacing:2px;">${s.number===0?'FOUNDATION':`STEP ${s.number}`} \u2014 ${s.category}</div>
+    </div>
+    <h2>${s.title}</h2>
+  </div>
+  <p class="body-text" style="font-size:15px;">${s.description}</p>
+  <div class="section-box" style="background:${ac}06;border:1px solid ${ac}12;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <span style="font-size:13px;">\ud83d\udca1</span>
+      <span class="label" style="color:${ac};">WHY IT MATTERS</span>
+    </div>
+    <p class="body-text">${s.whyItMatters}</p>
+  </div>`;
+
+  if (s.principles) {
+    h += `<div><div class="label" style="color:${ac};margin-bottom:12px;">CORE PRINCIPLES</div>
+      <div class="principles-grid">${s.principles.map(pr => `
+        <div class="principle-card" style="background:${pr.color}06;border:1px solid ${pr.color}15;">
+          <div class="principle-icon" style="background:${pr.color}12;border:1px solid ${pr.color}20;color:${pr.color};">${pr.icon}</div>
+          <div><div class="principle-title">${pr.title}</div><div class="principle-body">${pr.body}</div></div>
+        </div>`).join('')}</div></div>`;
+  }
+
+  h += `<div><div class="label" style="color:${ac};margin-bottom:12px;">KEY MECHANICS</div>
+    <div style="display:flex;flex-direction:column;gap:8px;">${s.mechanics.map(m =>
+      `<div class="mechanic-item"><span class="mechanic-dot" style="background:${ac};"></span><span class="body-text">${m}</span></div>`
+    ).join('')}</div></div>`;
+
+  h += `<div class="example-box" style="background:${ac}08;border:1px solid ${ac}15;">
+    <div class="label" style="color:${ac};margin-bottom:8px;">EXAMPLE</div>
+    <p class="mono">${s.example}</p>
+  </div>`;
+
+  h += `<div class="pitfall-box" style="background:${ac}06;border:1px solid ${ac}12;">
+    <span style="font-size:14px;flex-shrink:0;margin-top:2px;">\u26e8</span>
+    <div><span class="label" style="color:${ac};letter-spacing:1.4px;">WATCH OUT </span><span class="body-text">${s.pitfall}</span></div>
+  </div>`;
+
+  const nxt = s.number === 0 ? 1 : (activeStep + 1) % STEPS.length;
+  const lbl = s.number === 0 ? 'Start with Step 1 \u2192' : (activeStep < STEPS.length - 1 ? 'Next Step \u2192' : 'Back to Start \u2192');
+  h += `<div><button onclick="go(${nxt})" style="padding:10px 24px;border-radius:8px;border:1px solid ${ac}40;background:${ac}10;color:${ac};cursor:pointer;font-size:14px;font-weight:600;transition:all 0.15s;font-family:inherit;"
+    onmouseenter="this.style.background='${ac}20'" onmouseleave="this.style.background='${ac}10'">${lbl}</button></div>`;
+
+  p.innerHTML = h;
+}
+
+function go(idx) { activeStep = idx; renderDiagram(); renderList(); renderDetail(); }
+
+// ── Keyboard nav ──
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); go((activeStep + 1) % STEPS.length); }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); go((activeStep - 1 + STEPS.length) % STEPS.length); }
+});
+
+// ── Init ──
+renderDiagram(); renderList(); renderDetail();
+</script>
+</body>
+</html>
