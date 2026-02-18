@@ -377,7 +377,7 @@ git config core.autocrlf input
 
 ## Acknowledgments
 
-AgentEval is inspired by and originally forked from Microsoft's [EvalsforAgentsInterop](https://github.com/microsoft/EvalsforAgentsInterop). We gratefully acknowledge the original authors for their foundational work. See [AUTHORS.md](AUTHORS.md) for the full list of contributors.
+AgentEval is inspired by and originally forked from Microsoft's [EvalsforAgentsInterop](https://github.com/microsoft/EvalsforAgentsInterop).
 
 ## Security
 
@@ -386,4 +386,3 @@ See [SECURITY.md](SECURITY.md) for security policies and vulnerability reporting
 ## License
 
 This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
-# agentic-workflow-evals
