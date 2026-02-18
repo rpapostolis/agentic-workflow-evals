@@ -1,6 +1,6 @@
 # AgentEval
 
-A comprehensive demo platform for testing, evaluating, and continuously improving AI agents. Register agents, run evaluations with LLM-powered judging, annotate results at both the run and tool-call level, and use those annotations to generate prompt improvement proposals — all running locally against Ollama and SQLite.
+A comprehensive demo platform for testing, evaluating, and continuously improving AI agents. Register agents, run evaluations with LLM-powered judging, annotate results at both the run and tool-call level, and use those annotations to generate prompt improvement proposals. Runs locally against Ollama and SQLite, with optional Anthropic Claude API support for both the evaluation judge and the browser automation agent.
 
 ## Architecture
 
@@ -15,12 +15,12 @@ FastAPI backend that provides:
 - Evaluation comparison, regression detection, and annotation export
 - Prompt proposal generation from annotation data
 
-### 2. Agent — Port 8001
-Sample AI agent implementation that:
-- Connects to the API's MCP server for tool access
-- Uses a local LLM (via Ollama) for intelligent task execution
-- Demonstrates calendar scheduling and email capabilities
-- Serves as a reference implementation for agent development
+### 2. Computer Use Agent — Port 8001
+Browser automation agent with two backends:
+- **Ollama mode** (default) — uses a local vision model (e.g. `qwen3-vl`) for browser control
+- **Claude mode** — uses Anthropic's computer-use beta API (`claude-sonnet-4-5`, `claude-opus-4-6`, etc.)
+- Drives a real Playwright/Chromium browser with screenshot → action loops
+- Configurable via `CUA_MODE` in `.env` (toggle between `ollama` and `claude`)
 
 ### 3. Webapp (Frontend) — Port 5001
 React-based web interface for:
@@ -37,14 +37,21 @@ React-based web interface for:
 - **Python 3.10+** — [python.org/downloads](https://www.python.org/downloads/)
 - **Node.js 18+** and npm — [nodejs.org](https://nodejs.org/)
 - **Git** — [git-scm.com](https://git-scm.com/)
-- **Ollama** — [ollama.com/download](https://ollama.com/download) (macOS, Linux, Windows)
 
-**For the Computer Use Agent (E2E browser automation):**
-- **Playwright** — installed automatically on first agent start via `services.sh`, or manually with `python -m playwright install chromium`
+**For local mode (default — no cloud services):**
+- **Ollama** — [ollama.com/download](https://ollama.com/download) (macOS, Linux, Windows)
 - A **vision-capable** Ollama model (e.g. `qwen3-vl:latest`, `qwen2.5vl:7b`) for the CU Agent
 - A **reasoning** model (e.g. `qwen3-coder:latest`) for the LLM Judge
+- **Hardware:** 16 GB+ RAM recommended. Both models run through Ollama but never simultaneously.
 
-**Hardware:** 16 GB+ RAM recommended. Both models run through the same Ollama instance but never simultaneously — the CU Agent finishes its browser steps first, then the judge evaluates the trace. With less VRAM, Ollama swaps models in/out (slower but works).
+**For Claude mode (Anthropic API — faster, higher quality):**
+- An **Anthropic API key** (`ANTHROPIC_API_KEY` environment variable)
+- No local GPU needed — all inference runs via the API
+- Supports `claude-sonnet-4-5`, `claude-opus-4-6`, `claude-haiku-4-5` for the CU Agent
+- Supports any OpenAI-compatible or Anthropic model for the LLM Judge
+
+**For both modes:**
+- **Playwright** — installed automatically on first agent start via `services.sh`, or manually with `python -m playwright install chromium`
 
 ## Getting Started
 
@@ -56,18 +63,31 @@ cd AgentEval
 cp .env.example .env
 ```
 
-The defaults work out of the box with Ollama. Edit `.env` if you need to change models or ports:
+The defaults work out of the box with Ollama (no API key needed). Edit `.env` to switch to Claude mode or change models:
+
+**Core settings:**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server address |
-| `LLM_MODEL` | `qwen3-coder:latest` | Model for the eval judge (needs reasoning) |
-| `OLLAMA_MODEL` | `qwen3-vl:latest` | Model for the CU Agent (needs vision) |
+| `CUA_MODE` | `ollama` | CU Agent backend: `ollama` (local) or `claude` (Anthropic API) |
+| `CUA_MODEL` | `claude-sonnet-4-5-20250929` | Claude model when `CUA_MODE=claude` |
+| `OLLAMA_MODEL` | `cua-agent` | Ollama model when `CUA_MODE=ollama` |
+| `LLM_MODEL` | `qwen3-coder:latest` | Model for the eval judge |
+| `LLM_BASE_URL` | `${OLLAMA_HOST}/v1` | Judge LLM endpoint (Ollama or `https://api.anthropic.com/v1`) |
 | `CU_HEADLESS` | `false` | Set `true` to hide the browser during CU Agent runs |
-| `API_PORT` | `8000` | API server port |
-| `SQLITE_DB_PATH` | `./data/evals.db` | Path to SQLite database file |
+| `ENABLE_PII_DETECTION` | `true` | Auto-scan production traces for PII |
 
-### 2. Pull Ollama Models
+**API keys (only needed for Claude mode):**
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Anthropic API key — used by both CUA and Judge if set |
+| `LLM_API_KEY` | Judge-specific API key (falls back to `ANTHROPIC_API_KEY`) |
+| `CUA_API_KEY` | CUA-specific API key (falls back to `LLM_API_KEY` then `ANTHROPIC_API_KEY`) |
+
+### 2. Pull Models
+
+**Option A — Local with Ollama (default, no API key):**
 
 ```bash
 ollama serve   # start Ollama if not already running (keep this terminal open)
@@ -75,14 +95,27 @@ ollama serve   # start Ollama if not already running (keep this terminal open)
 # In another terminal:
 ollama pull qwen3-coder:latest   # Judge / reasoning model
 ollama pull qwen3-vl:latest      # CU Agent / vision model
+ollama list                      # verify both are listed
 ```
 
-Verify both are available:
+**Option B — Anthropic Claude API (no local GPU needed):**
+
+Set your API key and switch both the judge and CU Agent to Claude:
 
 ```bash
-ollama list
-# Should show both qwen3-coder:latest and qwen3-vl:latest
+# In .env:
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Judge — use Claude via the OpenAI-compatible endpoint:
+LLM_BASE_URL=https://api.anthropic.com/v1
+LLM_MODEL=claude-haiku-4-5
+
+# CU Agent — use Claude's computer-use beta:
+CUA_MODE=claude
+CUA_MODEL=claude-sonnet-4-5-20250929
 ```
+
+You can also mix: Ollama for the judge + Claude for the CU Agent (or vice versa).
 
 ### 3. Install Dependencies
 
@@ -219,12 +252,20 @@ Once 80% of test cases in an evaluation are annotated, the system can generate A
 ### Annotation Export
 Export all run-level and action-level annotations as JSON or CSV for external analysis.
 
+### Production Tracing
+Capture live agent interactions as production traces via the telemetry API. Traces are automatically scanned for PII, can be annotated, and converted into test cases for regression testing.
+
+### PII Detection
+Every production trace is scanned for personally identifiable information (emails, SSNs, phone numbers, credit cards, API keys, public IPs) before storage. Detected PII is flagged and can be redacted when converting traces to test cases. Controlled via `ENABLE_PII_DETECTION` in `.env`.
+
 ## Project Structure
 
 ```
 agent-eval/
-├── .env                  # Configuration (LLM endpoints, DB path, ports)
+├── .env                  # Configuration (LLM endpoints, CUA mode, ports)
 ├── .env.example          # Configuration template
+├── services.sh           # Start/stop/restart all services (Linux/macOS)
+├── services.ps1          # Start/stop/restart all services (Windows)
 ├── data/                 # SQLite database directory
 │   └── .gitkeep
 ├── src/
@@ -235,11 +276,17 @@ agent-eval/
 │   │   ├── models.py             # Pydantic models (incl. annotation models)
 │   │   ├── sqlite_service.py     # SQLite data layer
 │   │   ├── evaluator_service.py  # LLM-powered evaluation judge
+│   │   ├── pii_detector.py       # PII scanning & redaction for traces
 │   │   ├── mcp_service.py        # MCP tool server
 │   │   └── requirements.txt
-│   ├── agents/           # Sample agent implementation
-│   │   ├── agent_server.py       # LLM-powered agent
-│   │   └── requirements.txt
+│   ├── agents/
+│   │   └── computer_use/  # Browser automation agent
+│   │       ├── server.py          # FastAPI agent server (factory: Ollama or Claude)
+│   │       ├── agent.py           # Ollama-based CUA agent
+│   │       ├── claude_agent.py    # Claude API-based CUA agent
+│   │       ├── browser.py         # Playwright browser session manager
+│   │       ├── Modelfile          # Ollama Modelfile for cua-agent
+│   │       └── requirements.txt   # incl. anthropic SDK
 │   └── webapp/           # React frontend
 │       └── src/
 │           ├── lib/api.ts                          # API client + types
@@ -313,6 +360,18 @@ ollama pull qwen3-coder:latest     # judge model
 ollama pull qwen3-vl:latest        # CU Agent vision model
 ```
 
+### Claude CUA Mode Issues
+
+If the CU Agent fails with `ModuleNotFoundError: No module named 'anthropic'`:
+
+```bash
+pip install anthropic   # or: pip install -r src/agents/computer_use/requirements.txt
+```
+
+If the CU Agent fails with a 404 or "model not found" error, verify your `CUA_MODEL` matches an Anthropic model ID exactly (e.g. `claude-sonnet-4-5-20250929`, not a made-up string). Check [Anthropic's model docs](https://platform.claude.com/docs/en/about-claude/models/overview) for current IDs.
+
+If the CU Agent fails with "does not support tool types: computer_20250124", the model doesn't support computer use yet. Fall back to `claude-sonnet-4-5-20250929` or `claude-opus-4-6`.
+
 ### Throttling / Rate Limiting During Evaluations
 
 If evaluations run slowly or time out with many test cases, reduce the concurrency in your `.env` file:
@@ -321,6 +380,8 @@ If evaluations run slowly or time out with many test cases, reduce the concurren
 # Lower this if your local LLM is resource-constrained (default is 3)
 MAX_CONCURRENT_TESTS=2
 ```
+
+For Claude mode, Anthropic rate limits may cause retries (visible in the agent log as 429 responses). The SDK handles this automatically with exponential backoff.
 
 ### Database Issues
 
