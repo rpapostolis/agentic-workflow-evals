@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentEval — The Lean Evaluation Loop</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --fg: #e6edf3; --muted: #8b949e;
+    --blue: #58a6ff; --green: #3fb950; --red: #f85149;
+    --purple: #bc8cff; --orange: #f0883e; --yellow: #d29922;
+    --teal: #39d2c0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--fg); line-height: 1.6; min-height: 100vh;
+  }
+  .page { max-width: 1440px; margin: 0 auto; padding: 48px 72px; }
+
+  /* ── Hero ── */
+  .hero-label {
+    font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--blue); margin-bottom: 14px;
+  }
+  .hero h1 { font-size: 36px; font-weight: 700; line-height: 1.15; margin-bottom: 18px; }
+  .hero p { font-size: 15px; line-height: 1.7; color: var(--muted); max-width: 760px; }
+
+  /* ── Banners ── */
+  .info-banner {
+    border-radius: 12px; padding: 24px 28px; margin-bottom: 24px;
+    display: flex; gap: 16px; align-items: flex-start;
+  }
+  .info-banner .icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+  .info-banner .label {
+    font-size: 11px; font-weight: 700; letter-spacing: 1.8px;
+    text-transform: uppercase; margin-bottom: 6px;
+  }
+  .info-banner p { font-size: 14px; line-height: 1.7; color: var(--muted); }
+
+  /* ── Section Headers ── */
+  .section-header {
+    font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; margin-bottom: 16px; padding-top: 32px;
+  }
+
+  /* ── Agent Type Tabs ── */
+  .agent-type-bar {
+    display: flex; gap: 6px; margin-bottom: 40px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 6px;
+  }
+  .agent-tab {
+    flex: 1; padding: 12px 16px; border-radius: 8px; border: none;
+    background: transparent; cursor: pointer; text-align: center;
+    font-family: inherit; transition: all 0.2s; color: var(--muted);
+  }
+  .agent-tab:hover { background: rgba(88,166,255,0.04); }
+  .agent-tab.active { background: var(--tab-bg); border: 1px solid var(--tab-border); }
+  .agent-tab .tab-icon { font-size: 18px; display: block; margin-bottom: 4px; }
+  .agent-tab .tab-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  }
+  .agent-tab .tab-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .agent-tab.active .tab-label { color: var(--fg); }
+
+  /* ── Loop Layout ── */
+  .loop-layout { display: flex; gap: 40px; align-items: flex-start; }
+  .loop-left {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 24px; flex-shrink: 0; width: 260px;
+  }
+
+  /* ── Step Nav ── */
+  .step-nav { display: flex; flex-direction: column; gap: 3px; width: 100%; }
+  .step-btn {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; border-radius: 10px;
+    border: 1px solid transparent; background: transparent;
+    cursor: pointer; text-align: left; width: 100%;
+    transition: all 0.2s ease; font-family: inherit;
+  }
+  .step-btn:hover { background: rgba(88,166,255,0.04); }
+  .step-btn.active { border-color: var(--step-color); background: var(--step-bg); }
+  .step-btn .num {
+    width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+    border: 1.5px solid var(--border); color: var(--muted); transition: all 0.2s;
+  }
+  .step-btn.active .num {
+    border-color: var(--step-color); color: var(--step-color); background: var(--step-bg);
+  }
+  .step-btn .step-cat {
+    font-size: 10px; font-weight: 600; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 1px;
+  }
+  .step-btn.active .step-cat { color: var(--step-color); }
+  .step-btn .step-title { font-size: 14px; font-weight: 500; color: var(--muted); }
+  .step-btn.active .step-title { font-weight: 600; color: var(--fg); }
+
+  /* ── Detail Panel ── */
+  .detail-panel {
+    flex: 1; background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 32px 36px;
+    display: flex; flex-direction: column; gap: 24px;
+    animation: fadeInUp 0.25s ease;
+  }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .detail-panel .label {
+    font-size: 11px; font-weight: 700; letter-spacing: 1.8px; text-transform: uppercase;
+  }
+  .detail-panel h2 { font-size: 26px; font-weight: 700; line-height: 1.2; }
+  .detail-panel .body-text { font-size: 14px; line-height: 1.7; color: var(--muted); }
+  .detail-panel .section-box { border-radius: 10px; padding: 16px 20px; }
+  .detail-panel .mechanic-item { display: flex; gap: 10px; align-items: flex-start; }
+  .detail-panel .mechanic-dot {
+    width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; margin-top: 7px;
+  }
+  .detail-panel .example-box { border-radius: 10px; padding: 14px 20px; }
+  .detail-panel .mono {
+    font-size: 13px; line-height: 1.65; color: var(--muted);
+    font-family: 'SF Mono', 'Fira Code', monospace; white-space: pre-wrap;
+  }
+  .detail-panel .pitfall-box {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 12px 16px; border-radius: 8px;
+  }
+
+  /* ── Assertion Reference ── */
+  .assertion-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .assertion-card {
+    padding: 10px 14px; border-radius: 8px;
+    border: 1px solid var(--border); background: rgba(22,27,34,0.6);
+  }
+  .assertion-card .a-type {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.2px;
+    text-transform: uppercase; margin-bottom: 3px;
+  }
+  .assertion-card .a-judge {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    display: inline-block; margin-bottom: 4px;
+  }
+  .assertion-card .a-example {
+    font-size: 12px; line-height: 1.5; color: var(--muted);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  /* ── Cost Meter ── */
+  .cost-meter {
+    display: flex; gap: 12px; align-items: stretch;
+  }
+  .cost-item {
+    flex: 1; padding: 12px 16px; border-radius: 8px;
+    border: 1px solid var(--border); background: rgba(22,27,34,0.6);
+    text-align: center;
+  }
+  .cost-item .ci-value {
+    font-size: 20px; font-weight: 700; font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .cost-item .ci-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--muted); margin-top: 2px;
+  }
+  .cost-item .ci-delta {
+    font-size: 11px; margin-top: 4px; font-weight: 600;
+  }
+
+  /* ── SVG ── */
+  .svg-step { cursor: pointer; }
+  .svg-step:hover circle:first-child { opacity: 0.15 !important; }
+
+  /* ── Responsive ── */
+  @media (max-width: 900px) {
+    .page { padding: 32px 20px; }
+    .loop-layout { flex-direction: column; align-items: center; }
+    .loop-left { width: 100%; }
+    .assertion-grid { grid-template-columns: 1fr; }
+    .agent-type-bar { flex-direction: column; }
+    .cost-meter { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <!-- ── Hero ── -->
+  <div class="hero" style="margin-bottom: 28px;">
+    <div class="hero-label">THE LEAN EVALUATION LOOP</div>
+    <h1>
+      Four moves. <span style="color: var(--green)">Any agent.</span>
+    </h1>
+    <p>
+      Whether your agent drives a browser, extracts structured data from documents, or summarizes research — the same loop applies. Capture what it does, judge whether it's right, fix the instructions, verify you didn't break anything. Repeat until it works.
+    </p>
+  </div>
+
+  <!-- ── Philosophy ── -->
+  <div class="info-banner" style="background: linear-gradient(135deg, rgba(188,140,255,0.06), rgba(88,166,255,0.06)); border: 1px solid rgba(188,140,255,0.15);">
+    <span class="icon">&#9733;</span>
+    <div>
+      <div class="label" style="color: var(--purple);">WHY THIS EXISTS</div>
+      <p>
+        You can't unit-test non-deterministic systems the way you test deterministic code. An agent asked to "summarize this earnings report" produces different text every run. An agent asked to "find the CEO's name on this website" might navigate three different paths. Eval-driven development replaces "try it and hope" with a measurable loop: define what correct looks like, score the agent against it automatically, iterate until the score converges. The loop is the same whether you're testing a browser agent, a JSON extraction pipeline, or a summarization chain.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Document Handling ── -->
+  <div class="info-banner" style="background: linear-gradient(135deg, rgba(57,210,192,0.06), rgba(88,166,255,0.06)); border: 1px solid rgba(57,210,192,0.15); margin-bottom: 24px;">
+    <span class="icon">&#128196;</span>
+    <div>
+      <div class="label" style="color: var(--teal);">HANDLING DOCUMENT INPUTS</div>
+      <p>
+        Many agents take real documents as input — PDFs, images, spreadsheets, database query results. The eval runner usually can't access the originals (they're behind IAM roles, SharePoint, VPNs, or the user's local machine). The fix: snapshot documents into the fixture store at trace capture time — the only moment you're guaranteed access. Test cases reference fixtures by content hash; the agent endpoint receives resolved bytes at eval time regardless of where the original lived. For sensitive data, snapshot a redacted or synthetic version instead.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Cost Tracking ── -->
+  <div class="info-banner" style="background: linear-gradient(135deg, rgba(240,136,62,0.06), rgba(210,153,34,0.06)); border: 1px solid rgba(240,136,62,0.15); margin-bottom: 48px;">
+    <span class="icon">&#9889;</span>
+    <div>
+      <div class="label" style="color: var(--orange);">COST &amp; EFFICIENCY TRACKING</div>
+      <p style="margin-bottom: 14px;">
+        The real optimization target isn't pass rate — it's quality per token per dollar. An agent scoring 95% at 15k tokens/task is worse than 90% at 3k tokens for most production use cases. Every trace already captures token counts and latency. The framework should surface cost as a first-class metric alongside correctness at every step of the loop.
+      </p>
+      <div class="cost-meter">
+        <div class="cost-item">
+          <div class="ci-value" style="color: var(--blue);">8,200</div>
+          <div class="ci-label">Avg tokens / task</div>
+          <div class="ci-delta" style="color: var(--green);">&darr; 38% from v1</div>
+        </div>
+        <div class="cost-item">
+          <div class="ci-value" style="color: var(--orange);">$0.06</div>
+          <div class="ci-label">Cost / correct answer</div>
+          <div class="ci-delta" style="color: var(--green);">&darr; $0.06 from v1</div>
+        </div>
+        <div class="cost-item">
+          <div class="ci-value" style="color: var(--yellow);">$0.004</div>
+          <div class="ci-label">Judge cost / assertion</div>
+          <div class="ci-delta" style="color: var(--muted);">&#9889; 4/6 deterministic (free)</div>
+        </div>
+        <div class="cost-item">
+          <div class="ci-value" style="color: var(--green);">$847</div>
+          <div class="ci-label">Projected monthly @ 500 tasks/day</div>
+          <div class="ci-delta" style="color: var(--muted);">Based on 3 eval runs</div>
+        </div>
+      </div>
+      <p style="margin-top: 14px; font-size: 13px; color: var(--muted);">
+        <strong style="color: var(--orange);">Tracked per trace:</strong> input tokens, output tokens, judge tokens (separated from agent tokens), latency, model cost.
+        <strong style="color: var(--orange);">Tracked per eval run:</strong> total cost, cost per correct answer, cost per assertion (LLM vs deterministic), cost delta between prompt versions.
+        <strong style="color: var(--orange);">Projected at scale:</strong> once you have 3+ runs, the framework estimates monthly cost at your expected task volume.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Agent Type Selector ── -->
+  <div class="agent-type-bar" id="agent-type-bar"></div>
+
+  <!-- ── Main Layout ── -->
+  <div class="loop-layout">
+    <div class="loop-left">
+      <svg id="loop-diagram" width="260" height="260" viewBox="0 0 260 260" style="flex-shrink:0"></svg>
+      <div id="step-nav" class="step-nav"></div>
+    </div>
+    <div id="detail-panel" class="detail-panel"></div>
+  </div>
+</div>
+
+<script>
+// ── Agent Types ──
+const AGENT_TYPES = [
+  { id: "cua",        icon: "&#128301;", label: "Browser Agent",     desc: "Drives a real browser",     tabBg: "rgba(88,166,255,0.08)",  tabBorder: "rgba(88,166,255,0.25)" },
+  { id: "structured", icon: "&#123;&#125;", label: "Structured Output", desc: "Produces JSON / tables",  tabBg: "rgba(188,140,255,0.08)", tabBorder: "rgba(188,140,255,0.25)" },
+  { id: "analysis",   icon: "&#128202;", label: "Analysis Agent",    desc: "Summarizes &amp; reasons",  tabBg: "rgba(63,185,80,0.08)",   tabBorder: "rgba(63,185,80,0.25)" },
+];
+
+// ── Steps ──
+const STEPS = [
+  {
+    number: 1, category: "CAPTURE", title: "Run & Record Traces", color: "#58a6ff",
+    description: {
+      cua:        "Run the agent against real web tasks — navigate to a site, fill a form, extract data — and capture the full execution trace: every browser action, tool call, argument, screenshot, and the final response. Documents referenced in the task (PDFs to download, forms to fill) are snapshotted into the fixture store at this point — while the user still has access.",
+      structured: "Send real inputs to the agent — documents, data blobs, prompts with context — and capture the full request/response pair. The input document is snapshotted into the fixture store during capture (using whichever strategy fits your data sensitivity: raw copy, redacted, or synthetic clone). The trace records: input payload, structured output, intermediate steps, latency, token usage, and cost.",
+      analysis:   "Feed the agent real data plus an analysis prompt and capture everything: the source data (snapshotted at capture time — critical for large datasets behind database permissions), the prompt, any retrieval or tool calls, the final output, latency, token cost. Attach ground truth if available for comparison.",
+    },
+    whyItMatters: {
+      cua:        "You can only write test cases for scenarios you imagine. Real traces reveal behaviors you didn't predict — unexpected pop-ups, dynamic content, login walls. Each trace is a test case waiting to be promoted. Snapshotting documents at capture time is critical: the eval runner won't have the user's browser session, VPN, or SSO credentials later.",
+      structured: "Schema docs tell you what the output should look like. Production inputs tell you what actually breaks. A JSON extraction agent might handle clean documents perfectly but choke on scanned PDFs, inconsistent dates, or missing fields. Capturing the actual document at trace time means your fixture store grows from real production data — not synthetic test files that are too clean to be useful.",
+      analysis:   "A summarization agent might ace short documents but lose key points on 50-page reports, or hallucinate statistics not in the source. Real data — with its noise and ambiguity — is the only honest test. Snapshotting source data at capture time is especially important here: analysis agents often query databases or APIs that the eval runner has no access to. If you don't capture the data now, you can't reproduce the test later.",
+    },
+    mechanics: {
+      cua: [
+        "Register the agent endpoint (HTTP POST — any model, any architecture)",
+        "Enter natural-language instructions: \"Go to example.com and find the pricing for the Pro plan\"",
+        "Agent executes in a real browser — trace captures every navigate, click, scroll, read, and respond",
+        "Documents encountered during the task (downloaded PDFs, form data) are snapshotted to fixture store with content hash",
+        "PII auto-scan before storage — option to use redacted or synthetic snapshots for sensitive documents",
+        "Cost tracked per trace: input tokens, output tokens, latency, model, estimated dollar cost",
+      ],
+      structured: [
+        "Register the agent endpoint (HTTP POST — returns JSON, CSV, or other structured format)",
+        "Send a real input payload: a document + extraction prompt. Document is snapshotted to fixture store immediately",
+        "Snapshot strategy chosen per agent profile: raw copy (default), redacted (PII), synthetic clone (regulated), or inline base64 (small/portable)",
+        "Schema validation runs automatically on output if you've defined an expected schema",
+        "Batch mode: send 50 inputs at once — all 50 documents snapshotted, all 50 traces stored",
+        "Cost per trace: input tokens (includes document encoding), output tokens, total cost",
+      ],
+      analysis: [
+        "Register the agent endpoint (HTTP POST — returns text, markdown, or structured analysis)",
+        "Send real data + analysis prompt: \"Here's Q3 revenue data. Summarize trends and flag anomalies.\"",
+        "Source data snapshotted at capture time — stores a fingerprint + the actual data (or redacted/synthetic version)",
+        "For database-backed agents: the query results are captured, not the query itself — the eval runner can't re-run the query later",
+        "Attach ground truth if available (human-written summary, known correct answer) for later comparison",
+        "Cost tracked: input tokens (data encoding is often the largest cost), output tokens, any tool-call tokens, total",
+      ],
+    },
+    example: {
+      cua:        "Input: \"Go to news.ycombinator.com and list the top 5 headlines.\"\n\nAgent:   opens browser → navigates to HN → reads page → extracts titles → responds\nTrace:   5 tool calls captured (navigate, wait, read_page, extract, respond)\n         Total: 94s, 3,200 tokens, $0.008\nFixture: no documents involved (pure web scraping)\nResult:  trace stored, ready for judging.",
+      structured: "Input: { document: \"invoice_0892.pdf\", extract: [\"vendor\", \"total\", \"due_date\", \"line_items\"] }\n\nAgent:   parses PDF → identifies fields → returns JSON\nOutput:  { \"vendor\": \"Acme Corp\", \"total\": 4250.00, \"due_date\": \"2024-03-15\", \"line_items\": [...] }\nFixture: invoice_0892.pdf snapshotted → fixture:sha256:a3f2b8c... (1.2MB)\n         Redaction: applied (replaced real vendor address with synthetic)\nCost:    2,100 input tokens (PDF encoding) + 340 output tokens = $0.004\nResult:  trace + fixture stored. Test case can run without access to the original file server.",
+      analysis:   "Input: Q3 revenue spreadsheet (14 cols, 2,847 rows) + prompt: \"Top 3 trends and anomalies.\"\n\nAgent:   loads data → aggregates → identifies APAC outlier → writes summary\nOutput:  380-word analysis with 3 trends and 1 flagged anomaly\nFixture: spreadsheet snapshotted → fixture:sha256:e7d1f0a... (890KB)\n         Source: PostgreSQL query result — original DB not accessible to eval runner\nCost:    8,400 input tokens (spreadsheet encoding) + 520 output tokens = $0.019\nResult:  trace + data snapshot stored. Eval can reproduce without DB access.",
+    },
+    pitfall: {
+      cua:        "Don't only capture failures. Successful traces validate coverage and establish baseline behavior — a suite built only from broken runs misses regressions on the happy path.",
+      structured: "Don't forget to snapshot the document at capture time. If you only store a file path reference, the eval breaks the moment the file moves, permissions change, or the server goes down. The fixture store must be self-contained.",
+      analysis:   "Don't test with toy data. A summarizer that handles a 10-row CSV perfectly might hallucinate trends on 10,000 rows. Also: snapshot the actual query results, not just the query. The database might return different data tomorrow, making your eval non-reproducible.",
+    },
+  },
+  {
+    number: 2, category: "JUDGE", title: "Score & Annotate", color: "#d29922",
+    description: {
+      cua:        "Evaluate each trace with an LLM judge that scores behavioral assertions (\"did it navigate to the right page?\", \"did it extract all 5 titles?\") using chain-of-thought reasoning. Layer on human annotations for edge cases the automated judge can't catch — like the agent finding the right answer via a fragile path that'll break tomorrow.",
+      structured: "Validate output automatically where possible (schema checks, field type validation, numerical bounds) and use the LLM judge for semantic assertions (\"is the extracted vendor name correct even though the PDF says 'ACME CORP' and the expected answer is 'Acme Corporation'?\"). Human annotations for business-logic checks no automation can cover. Track judge cost separately — deterministic assertions are free, LLM assertions cost tokens.",
+      analysis:   "The LLM judge checks faithfulness (\"are all claims supported by the source data snapshot?\"), coverage (\"does the summary mention the APAC anomaly?\"), and format compliance. Human reviewers add domain expertise — was the anomaly actually significant, or a known seasonal pattern? Judge cost is higher here because faithfulness checks require sending source data to the judge alongside the output.",
+    },
+    whyItMatters: {
+      cua:        "The LLM judge catches semantic equivalence that string-matching misses — it knows \"Tokyo\" and \"Tokyo, Japan\" and \"the Japanese capital\" are the same thing. Human annotation catches what the judge can't — like an agent that arrives at the right answer but clicks through 15 pages when 2 would do.",
+      structured: "Half the assertions for structured output skip the LLM entirely — schema validation, type checks, numerical bounds are deterministic and free. This makes judging fast and cheap. The LLM only fires for fuzzy fields (names, descriptions, categories). Track this split: if you're spending more on judging than on the agent itself, you have too many semantic assertions and should convert some to deterministic checks.",
+      analysis:   "Faithfulness checking is the most important and most expensive assertion type. The judge needs the source data snapshot to verify claims — that's a lot of input tokens. But it's non-negotiable: a summary that sounds confident but hallucinates one statistic is worse than no summary. Optimize by chunking: only send relevant source data sections to the judge, not the entire dataset.",
+    },
+    mechanics: {
+      cua: [
+        "Define behavioral assertions: \"Agent navigates to HN\", \"Agent extracts at least 5 titles\", \"Agent returns a numbered list\"",
+        "LLM judge evaluates each assertion against the full tool-call trace with chain-of-thought reasoning",
+        "Human annotations: rate 1–5, tag efficiency (\"took 15 steps when 5 would do\"), flag fragile paths",
+        "Mark certain tests as holdout — excluded from AI prompt proposals to detect overfitting",
+        "Annotation coverage > 80% auto-triggers prompt improvement proposals",
+        "Cost breakdown: judge tokens tracked separately from agent tokens — behavioral assertions ~500 tokens each",
+      ],
+      structured: [
+        "Schema assertions (deterministic — free): \"output matches JSON schema\", \"all required fields present\", \"total > 0\"",
+        "Field-accuracy assertions (LLM judge): \"vendor matches 'Acme Corporation'\" — fuzzy matching, ~300 tokens per check",
+        "Completeness assertions (deterministic): \"all 12 line items present\" — array length check, zero cost",
+        "Human annotations: flag business-logic errors (correct format but wrong value), mark edge cases",
+        "Consistency checks: run same input 3x, assert outputs structurally equivalent (deterministic comparison)",
+        "Cost split shown per eval run: e.g., \"18 deterministic checks ($0) + 6 LLM checks ($0.02) = $0.02 total judge cost\"",
+      ],
+      analysis: [
+        "Faithfulness assertions (LLM judge — expensive): \"every number in output exists in source data snapshot\" — requires sending source data to judge",
+        "Coverage assertions (LLM judge): \"mentions: revenue trend, APAC anomaly, margin shift\" — ~800 tokens per check",
+        "Format/length assertions (deterministic — free): \"output is under 500 words\", \"contains exactly 3 sections\"",
+        "Tone assertions (LLM judge): \"formal business language, no hedging\"",
+        "Human annotations: rate analytical quality, flag cherry-picked data, mark misleading framing",
+        "Optimization: chunk source data for faithfulness checks — send only relevant columns/rows, not the full 2,847-row spreadsheet",
+      ],
+    },
+    example: {
+      cua:        "Test: \"Extract top 5 Hacker News titles.\"\n\nLLM judge results:\n  ✓ PASS  \"Navigates to news.ycombinator.com\"  — judge: \"Agent called navigate('https://news.ycombinator.com').\"\n  ✗ FAIL  \"Extracts at least 5 story titles\"     — judge: \"Agent extracted 3 titles. Did not scroll.\"\n  ✓ PASS  \"Returns a numbered list\"              — judge: \"Response contains numbered list format.\"\n\nJudge cost: 3 assertions × ~500 tokens = 1,500 judge tokens ($0.003)\nHuman annotation: 2/5 — correct site, incomplete extraction. Tagged: \"missed scroll.\"",
+      structured: "Test: extract fields from invoice PDF (loaded from fixture:sha256:a3f2b8c...).\n\nDeterministic checks (instant, $0):\n  ✓ PASS  Schema valid             — 4 required fields present, types correct\n  ✓ PASS  \"total\" is positive      — 4250.00 > 0\n  ✗ FAIL  \"due_date\" is ISO 8601   — got \"March 15, 2024\" not \"2024-03-15\"\n\nLLM judge (semantic, $0.004):\n  ✓ PASS  Vendor name matches      — \"Acme Corp\" ≈ \"ACME CORPORATION\" (judge: \"Same entity.\")\n\nTotal judge cost: $0.004 (3 free + 1 LLM)\nHuman annotation: 4/5 — only date format issue.",
+      analysis:   "Test: summarize Q3 revenue trends from snapshot fixture:sha256:e7d1f0a...\n\nLLM judge results:\n  ✓ PASS  Faithfulness     — \"All 4 cited numbers exist in source data.\" (2,100 judge tokens — sent relevant rows only)\n  ✗ FAIL  Coverage         — \"Mentions NA and EU trends but omits APAC anomaly.\"\n  ✓ PASS  Under 500 words  — 380 words (deterministic, $0)\n\nTotal judge cost: $0.008 (1 free + 2 LLM, faithfulness was expensive due to data context)\nHuman annotation: 3/5 — \"APAC dropped 34% QoQ. This is the main story, not a footnote.\"",
+    },
+    pitfall: {
+      cua:        "Don't rely only on automated judging. A test can PASS all assertions while the agent took a fragile path (clicked an element by pixel coordinates that'll move on next deploy). Human review catches these time bombs.",
+      structured: "Don't use LLM judge assertions for checks that can be deterministic. Every \"does this field match exactly?\" check that goes through the LLM costs tokens and adds latency for no benefit. Reserve the LLM for genuinely fuzzy comparisons.",
+      analysis:   "Don't send the full source dataset to the judge for faithfulness checks. A 2,847-row spreadsheet encoded as context burns thousands of tokens per assertion. Chunk it: extract only the rows/columns the output references, send those. Your judge cost drops 80%+ with no accuracy loss.",
+    },
+    assertionReference: true,
+  },
+  {
+    number: 3, category: "FIX", title: "Improve the Prompt", color: "#f0883e",
+    description: {
+      cua:        "The Prompt Lab reads every failure across your evaluation, groups them by root cause, and generates specific prompt modifications. For browser agents, patterns cluster around: incomplete page reading (didn't scroll), wrong element targeting (clicked the wrong button), and missing verification steps (didn't confirm the action succeeded).",
+      structured: "For structured output agents, failures cluster differently: date/number format inconsistencies, missing fields on certain document types, and schema violations when the input is messy or was captured via a different snapshot strategy than expected. The Prompt Lab sees these patterns statistically — \"4/10 invoice tests fail on date formatting\" — and proposes targeted fixes.",
+      analysis:   "For analysis agents, the patterns are subtler: coverage gaps (consistently misses one category of insight), faithfulness violations (invents statistics under certain conditions), and framing issues (buries the lead). The Prompt Lab uses both automated failure data and your human annotations. It also factors in cost — if a proposal would increase token usage significantly, the confidence score is adjusted downward.",
+    },
+    whyItMatters: {
+      cua:        "Manually reading 3 failures and guessing at a prompt fix works for the first iteration. By the third you're fighting regressions. Pattern detection works across all failures simultaneously, finding statistical signals you'd miss looking at individual cases.",
+      structured: "Structured output failures are often systematic — if the agent parses dates wrong on one invoice, it probably does it on every invoice. Pattern detection catches these and proposes a single fix that addresses all affected tests. It also flags when failures correlate with snapshot strategy: e.g., \"3/4 failures are on redacted documents where the date context was removed by the redaction pass.\"",
+      analysis:   "Analysis quality failures are the hardest to fix. \"Misses key insight\" can mean wrong data focus, premature summarization, or poor importance ranking. Human annotations provide the causal signal. The Prompt Lab also tracks the cost impact of proposals: adding \"always check for outliers\" might improve coverage but increase token usage 40% if the agent starts analyzing every data point.",
+    },
+    mechanics: {
+      cua: [
+        "Pattern detection groups failures: \"3/5 failures involve incomplete page content → agent doesn't scroll\"",
+        "AI proposal: \"After reading a page, always scroll to bottom and read again to capture dynamically loaded content.\"",
+        "Confidence: 0.82 — strong evidence (same root cause in 3 tests)",
+        "One-click apply creates new prompt version (v1 → v2). Full history preserved.",
+        "Estimated cost impact: \"+2s latency per task, +200 tokens avg (negligible)\"",
+      ],
+      structured: [
+        "Pattern detection: \"4/10 tests fail on date format — locale-dependent strings instead of ISO 8601\"",
+        "AI proposal: \"Always return dates in ISO 8601 (YYYY-MM-DD). Convert any other format.\" Confidence: 0.88",
+        "Secondary: \"When a required field is not found, return null instead of omitting the key.\" Confidence: 0.71",
+        "Proposals note if failures correlate with fixture type: \"2/4 date failures are on redacted docs where surrounding date context was stripped\"",
+        "Estimated cost impact: \"No token increase expected — format instruction adds 15 tokens to prompt\"",
+      ],
+      analysis: [
+        "Pattern detection uses human annotations: \"3 tests annotated 'missed key finding' — agent summarizes top-line numbers but skips outliers\"",
+        "AI proposal: \"After identifying trends, scan for outliers (values >2 std dev from mean). Include them even for small segments.\" Confidence: 0.75",
+        "Cost-aware proposal scoring: this proposal estimated to increase avg tokens by 35% (agent will analyze more data points)",
+        "Tone/framing proposal: \"Lead with the most significant finding, not the most common one.\" Confidence: 0.68",
+        "Cost impact shown: \"Outlier proposal: +35% tokens, +$0.007/task. Framing proposal: +0% tokens (reordering, not adding).\"",
+      ],
+    },
+    example: {
+      cua:        "Failures across 5 tests:\n  2x \"incomplete extraction\"  — agent didn't scroll\n  2x \"wrong element clicked\"  — similarly-named button\n  1x \"no verification\"        — submitted form, didn't check success\n\nProposal #1 (confidence 0.82, cost impact: +200 tokens):\n  \"After navigating, scroll to bottom and re-read content.\"\n\nProposal #2 (confidence 0.74, cost impact: +100 tokens):\n  \"When multiple similar elements exist, read all matches\n   and select the one whose context best fits the task.\"",
+      structured: "Failures across 10 invoice tests:\n  4x date format wrong    — \"March 15\" instead of \"2024-03-15\"\n  2x missing line items    — only first page of multi-page invoice\n  1x vendor name mangled   — included address in vendor field\n  Note: 2/4 date failures on redacted fixtures (date context stripped)\n\nProposal #1 (confidence 0.88, cost: +15 prompt tokens):\n  \"Return all dates in ISO 8601 format (YYYY-MM-DD).\"\n\nProposal #2 (confidence 0.76, cost: +20 prompt tokens):\n  \"Process all pages of multi-page documents.\"",
+      analysis:   "Failures across 6 summary tests:\n  3x missed outlier/anomaly    — humans tagged \"buries the lead\"\n  2x hallucinated percentage   — \"grew 12%\" but source shows 8%\n  1x too verbose               — 800 words vs 500 limit\n\nProposal #1 (confidence 0.75, cost: +35% tokens):\n  \"After identifying trends, check for outliers (>20% deviation).\n   Mention outliers prominently, even in small segments.\"\n\nProposal #2 (confidence 0.84, cost: +0% tokens):\n  \"Never compute percentages mentally. Show the calculation:\n   (new - old) / old × 100. Only state the result with the math.\"",
+    },
+    pitfall: {
+      cua:        "Don't apply a proposal and assume it worked. A \"scroll before extracting\" instruction might make the agent scroll on every page, adding 30s to tasks that didn't need it. Always verify in Step 4 — check both correctness and cost.",
+      structured: "Watch for fixture-strategy correlations. If failures cluster on redacted or synthetic documents, the problem might not be the agent's prompt — it might be that your redaction pass removes context the agent needs. Fix the fixture strategy, not the prompt.",
+      analysis:   "Cost-aware proposals matter most here. An \"always check for outliers\" instruction can double token usage on large datasets. The Prompt Lab should show estimated cost impact. If a proposal improves pass rate 10% but increases cost 40%, that trade-off needs to be explicit.",
+    },
+  },
+  {
+    number: 4, category: "VERIFY", title: "Compare & Promote", color: "#3fb950",
+    description: {
+      cua:        "Re-run the full evaluation with the updated prompt. The comparison view aligns results test-by-test: which browser tasks improved, which regressed, which held steady. Promote good traces from Step 1 into permanent test cases — the document fixtures are already stored, so promoted tests are immediately runnable.",
+      structured: "Re-run all test cases (fast — structured output agents respond in seconds). Compare field-by-field: did the date fix work? Did it break vendor extraction? Check cost delta alongside quality delta. Promote validated input/output pairs as regression anchors — document fixtures already in the store from Step 1.",
+      analysis:   "Re-run and compare: did faithfulness fixes eliminate hallucinated statistics? Did coverage improve? Check holdout tests — analysis prompt changes can overfit to specific data shapes. Compare cost: did the outlier-detection proposal increase tokens as predicted? Promote good summaries as reference examples for future few-shot prompting.",
+    },
+    whyItMatters: {
+      cua:        "A prompt change that fixes 3 extraction tests might break 2 navigation tests. Without test-by-test comparison you'd see \"60% → 70%\" and celebrate. With comparison, you see the regression. And because document fixtures were snapshotted in Step 1, promoted test cases work on any machine — no permission issues, no file-not-found errors.",
+      structured: "Structured output makes regression detection easy — diff actual JSON field by field. If the date fix changed \"March 15\" to \"2024-03-15\" in 4 tests and didn't touch anything else, that's hard proof the change was surgical. Cost comparison is equally important: if the fix added 0 tokens, it's purely positive. If it added 2,000 tokens per task, you need to weigh that.",
+      analysis:   "Analysis agents are the most prone to overfitting because quality is subjective. A prompt that says \"always mention outliers\" might flag noise as anomalies on clean datasets. Holdout tests with different data distributions catch this. Cost tracking catches the other risk: a 40% token increase that the proposal predicted should show up in the actual comparison — if it's higher, the prompt is causing the agent to over-analyze.",
+    },
+    mechanics: {
+      cua: [
+        "Side-by-side comparison: each test shows Improved / Regressed / Unchanged with judge reasoning",
+        "Cost comparison: avg tokens per task v1 vs v2, cost per correct answer v1 vs v2",
+        "Holdout tests: if training tests improved but holdout didn't, the change is overfitting",
+        "Promote traces: convert to permanent test case — document fixtures already in store, assertions from your annotations",
+        "Version trajectory: v1 (33%, $0.12/correct) → v2 (67%, $0.08/correct) → v3 (100%, $0.06/correct)",
+      ],
+      structured: [
+        "Field-level diff: \"due_date: 'March 15' → '2024-03-15'\" ✓ per test case",
+        "Schema pass rate tracked separately from semantic accuracy — schema should hit 100% first",
+        "Cost delta: total eval cost v1 vs v2, judge cost split (deterministic vs LLM), agent token delta",
+        "Promote golden pairs: validated input/output become regression anchors — document fixture + expected output locked together",
+        "Consistency tracking: if same input run 3x, compare variance — lower variance = more reliable",
+      ],
+      analysis: [
+        "Faithfulness delta: did hallucinated claims decrease? Tracked as separate metric from pass rate",
+        "Coverage delta: did agent start mentioning outliers? Check training AND holdout data",
+        "Cost delta: predicted vs actual token increase — if proposal predicted +35% and actual is +60%, the prompt is too aggressive",
+        "Promote reference summaries: human-approved outputs become few-shot examples in future prompts",
+        "Holdout monitoring: faithfulness improved on training data but not holdout? Fix is too narrow.",
+      ],
+    },
+    example: {
+      cua:        "Prompt v1 → v2 (added scrolling instruction):\n\n  Wikipedia population:  Unchanged  ✓ → ✓  (didn't need scrolling)\n  HN top 5 headlines:   Improved   ✗ → ✓  (now scrolls, extracts all 5)\n  Create dataset via UI: Improved   ✗ → ✓  (scrolled to find correct form)\n  Holdout — book search: Unchanged  ✓ → ✓  (no regression)\n\n  Quality: 33% → 100%  |  Δ +67%\n  Cost:    $0.12/correct → $0.06/correct  |  tokens +6% (scroll overhead)\n  Promote: HN trace → permanent test case (fixture: none needed, web-only)",
+      structured: "Prompt v1 → v2 (added date format instruction):\n\n  Invoice #0892: Improved  — \"March 15\" → \"2024-03-15\" ✓\n  Invoice #1034: Improved  — \"15/03/24\" → \"2024-03-15\" ✓\n  Invoice #0756: Unchanged — was already correct\n  Invoice #1201: Unchanged — missing field issue (different root cause)\n  Receipt #0044: Regressed — \"N/A\" → parse error (tried to convert \"N/A\" to date)\n\n  Quality: 60% → 80%  |  Δ +20%  |  1 regression\n  Cost:    $0.004/task avg → $0.004/task avg  |  no token change\n  Judge:   $0.02 total (unchanged — same assertion mix)\n  Next:    handle \"N/A\" as null. Receipt fixture already in store from Step 1.",
+      analysis:   "Prompt v1 → v2 (outlier detection + calculation instruction):\n\n  Q3 revenue summary:    Improved  — mentions APAC anomaly, no hallucinated %\n  Monthly KPI digest:    Improved  — percentages now shown with calculation\n  Annual trend report:   Unchanged — was already passing\n  Holdout — HR attrition: Improved  — caught Engineering dept outlier\n  Holdout — flat dataset:  Regressed — flagged normal variance as \"anomaly\"\n\n  Quality: 40% → 80%  |  Δ +40%  |  1 holdout regression\n  Cost:    $0.019/task → $0.026/task  |  +37% tokens (predicted: +35% ✓)\n  Verdict: outlier instruction too aggressive on flat data. Next: add threshold.\n  Promote: Q3 summary as reference example (source data fixture: sha256:e7d1f0a...)",
+    },
+    pitfall: {
+      cua:        "If all training tests pass but a holdout regresses, the prompt is memorizing scenarios, not learning behavior. Widen test diversity before iterating further.",
+      structured: "Watch for the \"N/A problem\" — format-fixing proposals break on edge cases where the field doesn't exist. Always include test cases with missing, null, and unexpected values. These edge cases should use the same fixture strategy as your production documents.",
+      analysis:   "The hardest regression to catch: the agent now mentions outliers (good) but frames everything as alarming (bad). Tone regressions don't show in pass/fail — they show in human review. Also check: if cost increased more than predicted, the prompt is causing over-analysis. Keep annotating even when numbers look good.",
+    },
+  },
+];
+
+// ── Assertion Types ──
+const ASSERTION_TYPES = {
+  cua: [
+    { type: "Behavioral", judge: "LLM", color: "#58a6ff", example: "\"Agent navigates to news.ycombinator.com\"" },
+    { type: "Sequence", judge: "LLM", color: "#58a6ff", example: "\"Agent reads the page before extracting data\"" },
+    { type: "Response Quality", judge: "LLM", color: "#d29922", example: "\"Response contains a numbered list of 5 titles\"" },
+    { type: "Latency", judge: "Auto", color: "#3fb950", example: "\"Completes in under 120 seconds\"" },
+    { type: "Cost", judge: "Auto", color: "#f0883e", example: "\"Under 5,000 total tokens\"" },
+  ],
+  structured: [
+    { type: "Schema", judge: "Auto", color: "#3fb950", example: "\"Output matches { vendor: str, total: float, ... }\"" },
+    { type: "Field Type", judge: "Auto", color: "#3fb950", example: "\"due_date is ISO 8601 format\"" },
+    { type: "Completeness", judge: "Auto", color: "#3fb950", example: "\"All 12 line items present in output array\"" },
+    { type: "Field Accuracy", judge: "LLM", color: "#d29922", example: "\"vendor matches 'Acme Corporation' (fuzzy)\"" },
+    { type: "Null Handling", judge: "Auto", color: "#3fb950", example: "\"Missing fields return null, not omitted\"" },
+    { type: "Consistency", judge: "Auto", color: "#bc8cff", example: "\"3 runs produce structurally identical output\"" },
+    { type: "Cost", judge: "Auto", color: "#f0883e", example: "\"Under 3,000 total tokens per extraction\"" },
+  ],
+  analysis: [
+    { type: "Faithfulness", judge: "LLM", color: "#f85149", example: "\"Every number in output exists in source data\"" },
+    { type: "Coverage", judge: "LLM", color: "#d29922", example: "\"Mentions: revenue trend, APAC anomaly, margin shift\"" },
+    { type: "Conciseness", judge: "Auto", color: "#3fb950", example: "\"Output is under 500 words\"" },
+    { type: "Tone", judge: "LLM", color: "#bc8cff", example: "\"Formal business language, no hedging\"" },
+    { type: "Numerical Accuracy", judge: "LLM", color: "#f85149", example: "\"All percentages have traceable calculation\"" },
+    { type: "Structure", judge: "Auto", color: "#3fb950", example: "\"Contains exactly 3 sections: trends, anomalies, recs\"" },
+    { type: "Cost", judge: "Auto", color: "#f0883e", example: "\"Under 10,000 tokens including data encoding\"" },
+  ],
+};
+
+// ── State ──
+let activeStep = 0;
+let activeAgentType = "cua";
+
+// ── Render ──
+function renderAgentBar() {
+  document.getElementById('agent-type-bar').innerHTML = AGENT_TYPES.map(a => {
+    const act = a.id === activeAgentType;
+    return `<button class="agent-tab ${act ? 'active' : ''}" style="--tab-bg:${a.tabBg};--tab-border:${a.tabBorder};" onclick="setAgentType('${a.id}')">
+      <span class="tab-icon">${a.icon}</span>
+      <div class="tab-label">${a.label}</div>
+      <div class="tab-desc">${a.desc}</div>
+    </button>`;
+  }).join('');
+}
+
+function setAgentType(id) { activeAgentType = id; renderAgentBar(); renderDetail(); }
+
+function renderDiagram() {
+  const svg = document.getElementById('loop-diagram');
+  const cx = 130, cy = 130, r = 90, nodeR = 24, n = STEPS.length;
+  const pos = STEPS.map((_, i) => {
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+  });
+  let h = '';
+  pos.forEach((p, i) => {
+    const nx = pos[(i + 1) % n];
+    const dx = nx.x - p.x, dy = nx.y - p.y;
+    const l = Math.sqrt(dx * dx + dy * dy), ux = dx / l, uy = dy / l;
+    const sx = p.x + ux * (nodeR + 5), sy = p.y + uy * (nodeR + 5);
+    const ex = nx.x - ux * (nodeR + 5), ey = nx.y - uy * (nodeR + 5);
+    const mx = (sx + ex) / 2, my = (sy + ey) / 2, s = 6;
+    h += `<line x1="${sx}" y1="${sy}" x2="${ex}" y2="${ey}" stroke="#30363d" stroke-width="1.5" opacity="0.6"/>`;
+    h += `<polygon points="${mx+ux*s},${my+uy*s} ${mx-uy*s},${my+ux*s} ${mx+uy*s},${my-ux*s}" fill="#30363d" opacity="0.6"/>`;
+  });
+  h += `<text x="${cx}" y="${cy-4}" text-anchor="middle" fill="#8b949e" font-size="9" font-weight="600" letter-spacing="1.5">EVAL</text>`;
+  h += `<text x="${cx}" y="${cy+10}" text-anchor="middle" fill="#8b949e" font-size="9" font-weight="600" letter-spacing="1.5">LOOP</text>`;
+  pos.forEach((p, i) => {
+    const st = STEPS[i], act = i === activeStep, ac = st.color;
+    if (act) {
+      h += `<circle cx="${p.x}" cy="${p.y}" r="${nodeR+6}" fill="none" stroke="${ac}" stroke-width="2" opacity="0.3">
+        <animate attributeName="r" values="${nodeR+4};${nodeR+10};${nodeR+4}" dur="2s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.3;0.08;0.3" dur="2s" repeatCount="indefinite"/>
+      </circle>`;
+    }
+    h += `<g class="svg-step" onclick="go(${i})">
+      <circle cx="${p.x}" cy="${p.y}" r="${nodeR}" fill="${act?ac+'18':'#161b22'}" stroke="${act?ac:'#30363d'}" stroke-width="${act?2.5:1.5}"/>
+      <text x="${p.x}" y="${p.y+1}" text-anchor="middle" dominant-baseline="central" fill="${act?ac:'#8b949e'}" font-size="15" font-weight="700">${st.number}</text>
+    </g>`;
+  });
+  svg.innerHTML = h;
+}
+
+function renderNav() {
+  document.getElementById('step-nav').innerHTML = STEPS.map((s, i) => {
+    const act = i === activeStep;
+    return `<button class="step-btn ${act?'active':''}" style="--step-color:${s.color};--step-bg:${s.color}0a;" onclick="go(${i})">
+      <span class="num">${s.number}</span>
+      <div><div class="step-cat">${s.category}</div><div class="step-title">${s.title}</div></div>
+    </button>`;
+  }).join('');
+}
+
+function renderDetail() {
+  const s = STEPS[activeStep], ac = s.color, at = activeAgentType;
+  const p = document.getElementById('detail-panel');
+  let h = '';
+
+  h += `<div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+      <div style="width:36px;height:36px;border-radius:9px;background:${ac}15;border:1px solid ${ac}30;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:${ac};">${s.number}</div>
+      <div class="label" style="color:${ac};font-size:12px;letter-spacing:2px;">STEP ${s.number} &mdash; ${s.category}</div>
+    </div>
+    <h2>${s.title}</h2>
+  </div>`;
+
+  h += `<p class="body-text" style="font-size:15px;">${s.description[at]}</p>`;
+
+  h += `<div class="section-box" style="background:${ac}06;border:1px solid ${ac}12;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <span style="font-size:13px;">&#128161;</span>
+      <span class="label" style="color:${ac};">WHY IT MATTERS</span>
+    </div>
+    <p class="body-text">${s.whyItMatters[at]}</p>
+  </div>`;
+
+  h += `<div><div class="label" style="color:${ac};margin-bottom:12px;">WHAT HAPPENS</div>
+    <div style="display:flex;flex-direction:column;gap:8px;">${s.mechanics[at].map(m =>
+      `<div class="mechanic-item"><span class="mechanic-dot" style="background:${ac};"></span><span class="body-text">${m}</span></div>`
+    ).join('')}</div></div>`;
+
+  if (s.assertionReference) {
+    const assertions = ASSERTION_TYPES[at];
+    h += `<div><div class="label" style="color:${ac};margin-bottom:12px;">ASSERTION TYPES</div>
+      <div class="assertion-grid">${assertions.map(a => `
+        <div class="assertion-card">
+          <div class="a-type" style="color:${a.color};">${a.type}</div>
+          <span class="a-judge" style="background:${a.judge==='Auto'?'rgba(63,185,80,0.12);color:#3fb950;border:1px solid rgba(63,185,80,0.2)':'rgba(210,153,34,0.12);color:#d29922;border:1px solid rgba(210,153,34,0.2)'};">${a.judge==='Auto'?'&#9889; Deterministic ($0)':'&#129504; LLM Judge'}</span>
+          <div class="a-example">${a.example}</div>
+        </div>
+      `).join('')}</div></div>`;
+  }
+
+  h += `<div class="example-box" style="background:${ac}08;border:1px solid ${ac}15;">
+    <div class="label" style="color:${ac};margin-bottom:8px;">CONCRETE EXAMPLE</div>
+    <p class="mono">${s.example[at]}</p>
+  </div>`;
+
+  h += `<div class="pitfall-box" style="background:${ac}06;border:1px solid ${ac}12;">
+    <span style="font-size:14px;flex-shrink:0;margin-top:2px;">&#9888;</span>
+    <div><span class="label" style="color:${ac};letter-spacing:1.4px;">WATCH OUT </span><span class="body-text">${s.pitfall[at]}</span></div>
+  </div>`;
+
+  const nxt = (activeStep + 1) % STEPS.length;
+  const lbl = activeStep < STEPS.length - 1 ? 'Next Step &#8594;' : 'Back to Step 1 &#8594;';
+  h += `<div><button onclick="go(${nxt})" style="padding:10px 24px;border-radius:8px;border:1px solid ${ac}40;background:${ac}10;color:${ac};cursor:pointer;font-size:14px;font-weight:600;transition:all 0.15s;font-family:inherit;"
+    onmouseenter="this.style.background='${ac}20'" onmouseleave="this.style.background='${ac}10'">${lbl}</button></div>`;
+
+  p.innerHTML = h;
+}
+
+function go(idx) { activeStep = idx; renderDiagram(); renderNav(); renderDetail(); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); go((activeStep + 1) % STEPS.length); }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); go((activeStep - 1 + STEPS.length) % STEPS.length); }
+});
+
+renderAgentBar(); renderDiagram(); renderNav(); renderDetail();
+</script>
+</body>
+</html>
