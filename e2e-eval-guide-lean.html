@@ -216,7 +216,7 @@
     <div>
       <div class="label" style="color: var(--teal);">HANDLING DOCUMENT INPUTS</div>
       <p>
-        Many agents take real documents as input — PDFs, images, spreadsheets, database query results. The eval runner usually can't access the originals (they're behind IAM roles, SharePoint, VPNs, or the user's local machine). The fix: snapshot documents into the fixture store at trace capture time — the only moment you're guaranteed access. Test cases reference fixtures by content hash; the agent endpoint receives resolved bytes at eval time regardless of where the original lived. For sensitive data, snapshot a redacted or synthetic version instead.
+        Many agents take real documents as input — PDFs, images, spreadsheets, database query results. The eval runner usually can't access the originals (they're behind IAM roles, SharePoint, VPNs, or the user's local machine). The fix: embed the document bytes directly in the trace record at capture time — the only moment you're guaranteed access. No separate fixture store, no extra infrastructure. The trace is fully self-contained: if you can query the trace, you have the document. When a trace gets promoted to a test case, the document travels with it. For sensitive data, run a redaction pass before embedding.
       </p>
     </div>
   </div>
@@ -285,13 +285,13 @@ const STEPS = [
   {
     number: 1, category: "CAPTURE", title: "Run & Record Traces", color: "#58a6ff",
     description: {
-      cua:        "Run the agent against real web tasks — navigate to a site, fill a form, extract data — and capture the full execution trace: every browser action, tool call, argument, screenshot, and the final response. Documents referenced in the task (PDFs to download, forms to fill) are snapshotted into the fixture store at this point — while the user still has access.",
-      structured: "Send real inputs to the agent — documents, data blobs, prompts with context — and capture the full request/response pair. The input document is snapshotted into the fixture store during capture (using whichever strategy fits your data sensitivity: raw copy, redacted, or synthetic clone). The trace records: input payload, structured output, intermediate steps, latency, token usage, and cost.",
+      cua:        "Run the agent against real web tasks — navigate to a site, fill a form, extract data — and capture the full execution trace: every browser action, tool call, argument, screenshot, and the final response. Any documents the task involves (PDFs to download, forms to fill) are embedded directly in the trace record at this point — while the user still has access.",
+      structured: "Send real inputs to the agent — documents, data blobs, prompts with context — and capture the full request/response pair. The input document is embedded directly in the trace record during capture. No separate storage needed. The trace records: input payload with document bytes, structured output, intermediate steps, latency, token usage, and cost.",
       analysis:   "Feed the agent real data plus an analysis prompt and capture everything: the source data (snapshotted at capture time — critical for large datasets behind database permissions), the prompt, any retrieval or tool calls, the final output, latency, token cost. Attach ground truth if available for comparison.",
     },
     whyItMatters: {
       cua:        "You can only write test cases for scenarios you imagine. Real traces reveal behaviors you didn't predict — unexpected pop-ups, dynamic content, login walls. Each trace is a test case waiting to be promoted. Snapshotting documents at capture time is critical: the eval runner won't have the user's browser session, VPN, or SSO credentials later.",
-      structured: "Schema docs tell you what the output should look like. Production inputs tell you what actually breaks. A JSON extraction agent might handle clean documents perfectly but choke on scanned PDFs, inconsistent dates, or missing fields. Capturing the actual document at trace time means your fixture store grows from real production data — not synthetic test files that are too clean to be useful.",
+      structured: "Schema docs tell you what the output should look like. Production inputs tell you what actually breaks. A JSON extraction agent might handle clean documents perfectly but choke on scanned PDFs, inconsistent dates, or missing fields. Embedding the actual document in the trace means your test suite grows from real production data — not synthetic test files that are too clean to be useful.",
       analysis:   "A summarization agent might ace short documents but lose key points on 50-page reports, or hallucinate statistics not in the source. Real data — with its noise and ambiguity — is the only honest test. Snapshotting source data at capture time is especially important here: analysis agents often query databases or APIs that the eval runner has no access to. If you don't capture the data now, you can't reproduce the test later.",
     },
     mechanics: {
@@ -299,35 +299,35 @@ const STEPS = [
         "Register the agent endpoint (HTTP POST — any model, any architecture)",
         "Enter natural-language instructions: \"Go to example.com and find the pricing for the Pro plan\"",
         "Agent executes in a real browser — trace captures every navigate, click, scroll, read, and respond",
-        "Documents encountered during the task (downloaded PDFs, form data) are snapshotted to fixture store with content hash",
-        "PII auto-scan before storage — option to use redacted or synthetic snapshots for sensitive documents",
+        "Documents encountered during the task (downloaded PDFs, form data) are embedded directly in the trace record",
+        "PII auto-scan before storage — option to redact sensitive content before embedding in the trace",
         "Cost tracked per trace: input tokens, output tokens, latency, model, estimated dollar cost",
       ],
       structured: [
         "Register the agent endpoint (HTTP POST — returns JSON, CSV, or other structured format)",
-        "Send a real input payload: a document + extraction prompt. Document is snapshotted to fixture store immediately",
-        "Snapshot strategy chosen per agent profile: raw copy (default), redacted (PII), synthetic clone (regulated), or inline base64 (small/portable)",
+        "Send a real input payload: a document + extraction prompt. Document bytes embedded in the trace record immediately",
+        "For sensitive documents: redact PII before embedding (the trace is the only copy — no separate store to secure)",
         "Schema validation runs automatically on output if you've defined an expected schema",
-        "Batch mode: send 50 inputs at once — all 50 documents snapshotted, all 50 traces stored",
+        "Batch mode: send 50 inputs at once — all 50 documents embedded in their traces, all 50 traces stored",
         "Cost per trace: input tokens (includes document encoding), output tokens, total cost",
       ],
       analysis: [
         "Register the agent endpoint (HTTP POST — returns text, markdown, or structured analysis)",
         "Send real data + analysis prompt: \"Here's Q3 revenue data. Summarize trends and flag anomalies.\"",
-        "Source data snapshotted at capture time — stores a fingerprint + the actual data (or redacted/synthetic version)",
+        "Source data embedded in the trace at capture time — the actual data (or a redacted version) lives inside the trace record",
         "For database-backed agents: the query results are captured, not the query itself — the eval runner can't re-run the query later",
         "Attach ground truth if available (human-written summary, known correct answer) for later comparison",
         "Cost tracked: input tokens (data encoding is often the largest cost), output tokens, any tool-call tokens, total",
       ],
     },
     example: {
-      cua:        "Input: \"Go to news.ycombinator.com and list the top 5 headlines.\"\n\nAgent:   opens browser → navigates to HN → reads page → extracts titles → responds\nTrace:   5 tool calls captured (navigate, wait, read_page, extract, respond)\n         Total: 94s, 3,200 tokens, $0.008\nFixture: no documents involved (pure web scraping)\nResult:  trace stored, ready for judging.",
-      structured: "Input: { document: \"invoice_0892.pdf\", extract: [\"vendor\", \"total\", \"due_date\", \"line_items\"] }\n\nAgent:   parses PDF → identifies fields → returns JSON\nOutput:  { \"vendor\": \"Acme Corp\", \"total\": 4250.00, \"due_date\": \"2024-03-15\", \"line_items\": [...] }\nFixture: invoice_0892.pdf snapshotted → fixture:sha256:a3f2b8c... (1.2MB)\n         Redaction: applied (replaced real vendor address with synthetic)\nCost:    2,100 input tokens (PDF encoding) + 340 output tokens = $0.004\nResult:  trace + fixture stored. Test case can run without access to the original file server.",
-      analysis:   "Input: Q3 revenue spreadsheet (14 cols, 2,847 rows) + prompt: \"Top 3 trends and anomalies.\"\n\nAgent:   loads data → aggregates → identifies APAC outlier → writes summary\nOutput:  380-word analysis with 3 trends and 1 flagged anomaly\nFixture: spreadsheet snapshotted → fixture:sha256:e7d1f0a... (890KB)\n         Source: PostgreSQL query result — original DB not accessible to eval runner\nCost:    8,400 input tokens (spreadsheet encoding) + 520 output tokens = $0.019\nResult:  trace + data snapshot stored. Eval can reproduce without DB access.",
+      cua:        "Input: \"Go to news.ycombinator.com and list the top 5 headlines.\"\n\nAgent:   opens browser → navigates to HN → reads page → extracts titles → responds\nTrace:   5 tool calls captured (navigate, wait, read_page, extract, respond)\n         Total: 94s, 3,200 tokens, $0.008\nDocs:    no documents involved (pure web scraping)\nResult:  trace stored, ready for judging.",
+      structured: "Input: { document: \"invoice_0892.pdf\", extract: [\"vendor\", \"total\", \"due_date\", \"line_items\"] }\n\nAgent:   parses PDF → identifies fields → returns JSON\nOutput:  { \"vendor\": \"Acme Corp\", \"total\": 4250.00, \"due_date\": \"2024-03-15\", \"line_items\": [...] }\nDocs:    invoice_0892.pdf (1.2MB) embedded in trace record, PII redacted\nCost:    2,100 input tokens (PDF encoding) + 340 output tokens = $0.004\nResult:  self-contained trace stored. Test case can run without access to the original file server.",
+      analysis:   "Input: Q3 revenue spreadsheet (14 cols, 2,847 rows) + prompt: \"Top 3 trends and anomalies.\"\n\nAgent:   loads data → aggregates → identifies APAC outlier → writes summary\nOutput:  380-word analysis with 3 trends and 1 flagged anomaly\nDocs:    spreadsheet (890KB) embedded in trace — original was a PostgreSQL query result\nCost:    8,400 input tokens (spreadsheet encoding) + 520 output tokens = $0.019\nResult:  self-contained trace stored. Eval can reproduce without DB access.",
     },
     pitfall: {
       cua:        "Don't only capture failures. Successful traces validate coverage and establish baseline behavior — a suite built only from broken runs misses regressions on the happy path.",
-      structured: "Don't forget to snapshot the document at capture time. If you only store a file path reference, the eval breaks the moment the file moves, permissions change, or the server goes down. The fixture store must be self-contained.",
+      structured: "Don't store a file path reference instead of the actual document. The eval breaks the moment the file moves, permissions change, or the server goes down. Embed the bytes in the trace — the trace must be self-contained.",
       analysis:   "Don't test with toy data. A summarizer that handles a 10-row CSV perfectly might hallucinate trends on 10,000 rows. Also: snapshot the actual query results, not just the query. The database might return different data tomorrow, making your eval non-reproducible.",
     },
   },
@@ -371,8 +371,8 @@ const STEPS = [
     },
     example: {
       cua:        "Test: \"Extract top 5 Hacker News titles.\"\n\nLLM judge results:\n  ✓ PASS  \"Navigates to news.ycombinator.com\"  — judge: \"Agent called navigate('https://news.ycombinator.com').\"\n  ✗ FAIL  \"Extracts at least 5 story titles\"     — judge: \"Agent extracted 3 titles. Did not scroll.\"\n  ✓ PASS  \"Returns a numbered list\"              — judge: \"Response contains numbered list format.\"\n\nJudge cost: 3 assertions × ~500 tokens = 1,500 judge tokens ($0.003)\nHuman annotation: 2/5 — correct site, incomplete extraction. Tagged: \"missed scroll.\"",
-      structured: "Test: extract fields from invoice PDF (loaded from fixture:sha256:a3f2b8c...).\n\nDeterministic checks (instant, $0):\n  ✓ PASS  Schema valid             — 4 required fields present, types correct\n  ✓ PASS  \"total\" is positive      — 4250.00 > 0\n  ✗ FAIL  \"due_date\" is ISO 8601   — got \"March 15, 2024\" not \"2024-03-15\"\n\nLLM judge (semantic, $0.004):\n  ✓ PASS  Vendor name matches      — \"Acme Corp\" ≈ \"ACME CORPORATION\" (judge: \"Same entity.\")\n\nTotal judge cost: $0.004 (3 free + 1 LLM)\nHuman annotation: 4/5 — only date format issue.",
-      analysis:   "Test: summarize Q3 revenue trends from snapshot fixture:sha256:e7d1f0a...\n\nLLM judge results:\n  ✓ PASS  Faithfulness     — \"All 4 cited numbers exist in source data.\" (2,100 judge tokens — sent relevant rows only)\n  ✗ FAIL  Coverage         — \"Mentions NA and EU trends but omits APAC anomaly.\"\n  ✓ PASS  Under 500 words  — 380 words (deterministic, $0)\n\nTotal judge cost: $0.008 (1 free + 2 LLM, faithfulness was expensive due to data context)\nHuman annotation: 3/5 — \"APAC dropped 34% QoQ. This is the main story, not a footnote.\"",
+      structured: "Test: extract fields from invoice PDF (loaded from trace record).\n\nDeterministic checks (instant, $0):\n  ✓ PASS  Schema valid             — 4 required fields present, types correct\n  ✓ PASS  \"total\" is positive      — 4250.00 > 0\n  ✗ FAIL  \"due_date\" is ISO 8601   — got \"March 15, 2024\" not \"2024-03-15\"\n\nLLM judge (semantic, $0.004):\n  ✓ PASS  Vendor name matches      — \"Acme Corp\" ≈ \"ACME CORPORATION\" (judge: \"Same entity.\")\n\nTotal judge cost: $0.004 (3 free + 1 LLM)\nHuman annotation: 4/5 — only date format issue.",
+      analysis:   "Test: summarize Q3 revenue trends (source data loaded from trace record).\n\nLLM judge results:\n  ✓ PASS  Faithfulness     — \"All 4 cited numbers exist in source data.\" (2,100 judge tokens — sent relevant rows only)\n  ✗ FAIL  Coverage         — \"Mentions NA and EU trends but omits APAC anomaly.\"\n  ✓ PASS  Under 500 words  — 380 words (deterministic, $0)\n\nTotal judge cost: $0.008 (1 free + 2 LLM, faithfulness was expensive due to data context)\nHuman annotation: 3/5 — \"APAC dropped 34% QoQ. This is the main story, not a footnote.\"",
     },
     pitfall: {
       cua:        "Don't rely only on automated judging. A test can PASS all assertions while the agent took a fragile path (clicked an element by pixel coordinates that'll move on next deploy). Human review catches these time bombs.",
@@ -385,12 +385,12 @@ const STEPS = [
     number: 3, category: "FIX", title: "Improve the Prompt", color: "#f0883e",
     description: {
       cua:        "The Prompt Lab reads every failure across your evaluation, groups them by root cause, and generates specific prompt modifications. For browser agents, patterns cluster around: incomplete page reading (didn't scroll), wrong element targeting (clicked the wrong button), and missing verification steps (didn't confirm the action succeeded).",
-      structured: "For structured output agents, failures cluster differently: date/number format inconsistencies, missing fields on certain document types, and schema violations when the input is messy or was captured via a different snapshot strategy than expected. The Prompt Lab sees these patterns statistically — \"4/10 invoice tests fail on date formatting\" — and proposes targeted fixes.",
+      structured: "For structured output agents, failures cluster differently: date/number format inconsistencies, missing fields on certain document types, and schema violations when the input is messy. The Prompt Lab sees these patterns statistically — \"4/10 invoice tests fail on date formatting\" — and proposes targeted fixes.",
       analysis:   "For analysis agents, the patterns are subtler: coverage gaps (consistently misses one category of insight), faithfulness violations (invents statistics under certain conditions), and framing issues (buries the lead). The Prompt Lab uses both automated failure data and your human annotations. It also factors in cost — if a proposal would increase token usage significantly, the confidence score is adjusted downward.",
     },
     whyItMatters: {
       cua:        "Manually reading 3 failures and guessing at a prompt fix works for the first iteration. By the third you're fighting regressions. Pattern detection works across all failures simultaneously, finding statistical signals you'd miss looking at individual cases.",
-      structured: "Structured output failures are often systematic — if the agent parses dates wrong on one invoice, it probably does it on every invoice. Pattern detection catches these and proposes a single fix that addresses all affected tests. It also flags when failures correlate with snapshot strategy: e.g., \"3/4 failures are on redacted documents where the date context was removed by the redaction pass.\"",
+      structured: "Structured output failures are often systematic — if the agent parses dates wrong on one invoice, it probably does it on every invoice. Pattern detection catches these and proposes a single fix that addresses all affected tests at once, rather than patching them one by one.",
       analysis:   "Analysis quality failures are the hardest to fix. \"Misses key insight\" can mean wrong data focus, premature summarization, or poor importance ranking. Human annotations provide the causal signal. The Prompt Lab also tracks the cost impact of proposals: adding \"always check for outliers\" might improve coverage but increase token usage 40% if the agent starts analyzing every data point.",
     },
     mechanics: {
@@ -405,7 +405,7 @@ const STEPS = [
         "Pattern detection: \"4/10 tests fail on date format — locale-dependent strings instead of ISO 8601\"",
         "AI proposal: \"Always return dates in ISO 8601 (YYYY-MM-DD). Convert any other format.\" Confidence: 0.88",
         "Secondary: \"When a required field is not found, return null instead of omitting the key.\" Confidence: 0.71",
-        "Proposals note if failures correlate with fixture type: \"2/4 date failures are on redacted docs where surrounding date context was stripped\"",
+        "Proposals note if failures correlate with document type: \"2/4 date failures are on redacted docs where surrounding date context was stripped\"",
         "Estimated cost impact: \"No token increase expected — format instruction adds 15 tokens to prompt\"",
       ],
       analysis: [
@@ -418,24 +418,24 @@ const STEPS = [
     },
     example: {
       cua:        "Failures across 5 tests:\n  2x \"incomplete extraction\"  — agent didn't scroll\n  2x \"wrong element clicked\"  — similarly-named button\n  1x \"no verification\"        — submitted form, didn't check success\n\nProposal #1 (confidence 0.82, cost impact: +200 tokens):\n  \"After navigating, scroll to bottom and re-read content.\"\n\nProposal #2 (confidence 0.74, cost impact: +100 tokens):\n  \"When multiple similar elements exist, read all matches\n   and select the one whose context best fits the task.\"",
-      structured: "Failures across 10 invoice tests:\n  4x date format wrong    — \"March 15\" instead of \"2024-03-15\"\n  2x missing line items    — only first page of multi-page invoice\n  1x vendor name mangled   — included address in vendor field\n  Note: 2/4 date failures on redacted fixtures (date context stripped)\n\nProposal #1 (confidence 0.88, cost: +15 prompt tokens):\n  \"Return all dates in ISO 8601 format (YYYY-MM-DD).\"\n\nProposal #2 (confidence 0.76, cost: +20 prompt tokens):\n  \"Process all pages of multi-page documents.\"",
+      structured: "Failures across 10 invoice tests:\n  4x date format wrong    — \"March 15\" instead of \"2024-03-15\"\n  2x missing line items    — only first page of multi-page invoice\n  1x vendor name mangled   — included address in vendor field\n\nProposal #1 (confidence 0.88, cost: +15 prompt tokens):\n  \"Return all dates in ISO 8601 format (YYYY-MM-DD).\"\n\nProposal #2 (confidence 0.76, cost: +20 prompt tokens):\n  \"Process all pages of multi-page documents.\"",
       analysis:   "Failures across 6 summary tests:\n  3x missed outlier/anomaly    — humans tagged \"buries the lead\"\n  2x hallucinated percentage   — \"grew 12%\" but source shows 8%\n  1x too verbose               — 800 words vs 500 limit\n\nProposal #1 (confidence 0.75, cost: +35% tokens):\n  \"After identifying trends, check for outliers (>20% deviation).\n   Mention outliers prominently, even in small segments.\"\n\nProposal #2 (confidence 0.84, cost: +0% tokens):\n  \"Never compute percentages mentally. Show the calculation:\n   (new - old) / old × 100. Only state the result with the math.\"",
     },
     pitfall: {
       cua:        "Don't apply a proposal and assume it worked. A \"scroll before extracting\" instruction might make the agent scroll on every page, adding 30s to tasks that didn't need it. Always verify in Step 4 — check both correctness and cost.",
-      structured: "Watch for fixture-strategy correlations. If failures cluster on redacted or synthetic documents, the problem might not be the agent's prompt — it might be that your redaction pass removes context the agent needs. Fix the fixture strategy, not the prompt.",
+      structured: "Watch for redaction correlations. If failures cluster on redacted documents, the problem might not be the agent's prompt — it might be that your redaction pass removes context the agent needs. Fix the redaction, not the prompt.",
       analysis:   "Cost-aware proposals matter most here. An \"always check for outliers\" instruction can double token usage on large datasets. The Prompt Lab should show estimated cost impact. If a proposal improves pass rate 10% but increases cost 40%, that trade-off needs to be explicit.",
     },
   },
   {
     number: 4, category: "VERIFY", title: "Compare & Promote", color: "#3fb950",
     description: {
-      cua:        "Re-run the full evaluation with the updated prompt. The comparison view aligns results test-by-test: which browser tasks improved, which regressed, which held steady. Promote good traces from Step 1 into permanent test cases — the document fixtures are already stored, so promoted tests are immediately runnable.",
-      structured: "Re-run all test cases (fast — structured output agents respond in seconds). Compare field-by-field: did the date fix work? Did it break vendor extraction? Check cost delta alongside quality delta. Promote validated input/output pairs as regression anchors — document fixtures already in the store from Step 1.",
+      cua:        "Re-run the full evaluation with the updated prompt. The comparison view aligns results test-by-test: which browser tasks improved, which regressed, which held steady. Promote good traces from Step 1 into permanent test cases — documents are already embedded in the trace, so promoted tests are immediately runnable anywhere.",
+      structured: "Re-run all test cases (fast — structured output agents respond in seconds). Compare field-by-field: did the date fix work? Did it break vendor extraction? Check cost delta alongside quality delta. Promote validated input/output pairs as regression anchors — documents travel with the trace, no external dependencies.",
       analysis:   "Re-run and compare: did faithfulness fixes eliminate hallucinated statistics? Did coverage improve? Check holdout tests — analysis prompt changes can overfit to specific data shapes. Compare cost: did the outlier-detection proposal increase tokens as predicted? Promote good summaries as reference examples for future few-shot prompting.",
     },
     whyItMatters: {
-      cua:        "A prompt change that fixes 3 extraction tests might break 2 navigation tests. Without test-by-test comparison you'd see \"60% → 70%\" and celebrate. With comparison, you see the regression. And because document fixtures were snapshotted in Step 1, promoted test cases work on any machine — no permission issues, no file-not-found errors.",
+      cua:        "A prompt change that fixes 3 extraction tests might break 2 navigation tests. Without test-by-test comparison you'd see \"60% → 70%\" and celebrate. With comparison, you see the regression. And because documents are embedded in traces, promoted test cases work on any machine — no permission issues, no missing files.",
       structured: "Structured output makes regression detection easy — diff actual JSON field by field. If the date fix changed \"March 15\" to \"2024-03-15\" in 4 tests and didn't touch anything else, that's hard proof the change was surgical. Cost comparison is equally important: if the fix added 0 tokens, it's purely positive. If it added 2,000 tokens per task, you need to weigh that.",
       analysis:   "Analysis agents are the most prone to overfitting because quality is subjective. A prompt that says \"always mention outliers\" might flag noise as anomalies on clean datasets. Holdout tests with different data distributions catch this. Cost tracking catches the other risk: a 40% token increase that the proposal predicted should show up in the actual comparison — if it's higher, the prompt is causing the agent to over-analyze.",
     },
@@ -444,14 +444,14 @@ const STEPS = [
         "Side-by-side comparison: each test shows Improved / Regressed / Unchanged with judge reasoning",
         "Cost comparison: avg tokens per task v1 vs v2, cost per correct answer v1 vs v2",
         "Holdout tests: if training tests improved but holdout didn't, the change is overfitting",
-        "Promote traces: convert to permanent test case — document fixtures already in store, assertions from your annotations",
+        "Promote traces: convert to permanent test case — documents already in the trace, assertions from your annotations",
         "Version trajectory: v1 (33%, $0.12/correct) → v2 (67%, $0.08/correct) → v3 (100%, $0.06/correct)",
       ],
       structured: [
         "Field-level diff: \"due_date: 'March 15' → '2024-03-15'\" ✓ per test case",
         "Schema pass rate tracked separately from semantic accuracy — schema should hit 100% first",
         "Cost delta: total eval cost v1 vs v2, judge cost split (deterministic vs LLM), agent token delta",
-        "Promote golden pairs: validated input/output become regression anchors — document fixture + expected output locked together",
+        "Promote golden pairs: validated input/output become regression anchors — document bytes + expected output locked together in the trace",
         "Consistency tracking: if same input run 3x, compare variance — lower variance = more reliable",
       ],
       analysis: [
@@ -463,13 +463,13 @@ const STEPS = [
       ],
     },
     example: {
-      cua:        "Prompt v1 → v2 (added scrolling instruction):\n\n  Wikipedia population:  Unchanged  ✓ → ✓  (didn't need scrolling)\n  HN top 5 headlines:   Improved   ✗ → ✓  (now scrolls, extracts all 5)\n  Create dataset via UI: Improved   ✗ → ✓  (scrolled to find correct form)\n  Holdout — book search: Unchanged  ✓ → ✓  (no regression)\n\n  Quality: 33% → 100%  |  Δ +67%\n  Cost:    $0.12/correct → $0.06/correct  |  tokens +6% (scroll overhead)\n  Promote: HN trace → permanent test case (fixture: none needed, web-only)",
-      structured: "Prompt v1 → v2 (added date format instruction):\n\n  Invoice #0892: Improved  — \"March 15\" → \"2024-03-15\" ✓\n  Invoice #1034: Improved  — \"15/03/24\" → \"2024-03-15\" ✓\n  Invoice #0756: Unchanged — was already correct\n  Invoice #1201: Unchanged — missing field issue (different root cause)\n  Receipt #0044: Regressed — \"N/A\" → parse error (tried to convert \"N/A\" to date)\n\n  Quality: 60% → 80%  |  Δ +20%  |  1 regression\n  Cost:    $0.004/task avg → $0.004/task avg  |  no token change\n  Judge:   $0.02 total (unchanged — same assertion mix)\n  Next:    handle \"N/A\" as null. Receipt fixture already in store from Step 1.",
-      analysis:   "Prompt v1 → v2 (outlier detection + calculation instruction):\n\n  Q3 revenue summary:    Improved  — mentions APAC anomaly, no hallucinated %\n  Monthly KPI digest:    Improved  — percentages now shown with calculation\n  Annual trend report:   Unchanged — was already passing\n  Holdout — HR attrition: Improved  — caught Engineering dept outlier\n  Holdout — flat dataset:  Regressed — flagged normal variance as \"anomaly\"\n\n  Quality: 40% → 80%  |  Δ +40%  |  1 holdout regression\n  Cost:    $0.019/task → $0.026/task  |  +37% tokens (predicted: +35% ✓)\n  Verdict: outlier instruction too aggressive on flat data. Next: add threshold.\n  Promote: Q3 summary as reference example (source data fixture: sha256:e7d1f0a...)",
+      cua:        "Prompt v1 → v2 (added scrolling instruction):\n\n  Wikipedia population:  Unchanged  ✓ → ✓  (didn't need scrolling)\n  HN top 5 headlines:   Improved   ✗ → ✓  (now scrolls, extracts all 5)\n  Create dataset via UI: Improved   ✗ → ✓  (scrolled to find correct form)\n  Holdout — book search: Unchanged  ✓ → ✓  (no regression)\n\n  Quality: 33% → 100%  |  Δ +67%\n  Cost:    $0.12/correct → $0.06/correct  |  tokens +6% (scroll overhead)\n  Promote: HN trace → permanent test case (self-contained, no docs needed)",
+      structured: "Prompt v1 → v2 (added date format instruction):\n\n  Invoice #0892: Improved  — \"March 15\" → \"2024-03-15\" ✓\n  Invoice #1034: Improved  — \"15/03/24\" → \"2024-03-15\" ✓\n  Invoice #0756: Unchanged — was already correct\n  Invoice #1201: Unchanged — missing field issue (different root cause)\n  Receipt #0044: Regressed — \"N/A\" → parse error (tried to convert \"N/A\" to date)\n\n  Quality: 60% → 80%  |  Δ +20%  |  1 regression\n  Cost:    $0.004/task avg → $0.004/task avg  |  no token change\n  Judge:   $0.02 total (unchanged — same assertion mix)\n  Next:    handle \"N/A\" as null. Receipt doc already embedded in trace from Step 1.",
+      analysis:   "Prompt v1 → v2 (outlier detection + calculation instruction):\n\n  Q3 revenue summary:    Improved  — mentions APAC anomaly, no hallucinated %\n  Monthly KPI digest:    Improved  — percentages now shown with calculation\n  Annual trend report:   Unchanged — was already passing\n  Holdout — HR attrition: Improved  — caught Engineering dept outlier\n  Holdout — flat dataset:  Regressed — flagged normal variance as \"anomaly\"\n\n  Quality: 40% → 80%  |  Δ +40%  |  1 holdout regression\n  Cost:    $0.019/task → $0.026/task  |  +37% tokens (predicted: +35% ✓)\n  Verdict: outlier instruction too aggressive on flat data. Next: add threshold.\n  Promote: Q3 summary as reference example (source data embedded in trace)",
     },
     pitfall: {
       cua:        "If all training tests pass but a holdout regresses, the prompt is memorizing scenarios, not learning behavior. Widen test diversity before iterating further.",
-      structured: "Watch for the \"N/A problem\" — format-fixing proposals break on edge cases where the field doesn't exist. Always include test cases with missing, null, and unexpected values. These edge cases should use the same fixture strategy as your production documents.",
+      structured: "Watch for the \"N/A problem\" — format-fixing proposals break on edge cases where the field doesn't exist. Always include test cases with missing, null, and unexpected values.",
       analysis:   "The hardest regression to catch: the agent now mentions outliers (good) but frames everything as alarming (bad). Tone regressions don't show in pass/fail — they show in human review. Also check: if cost increased more than predicted, the prompt is causing over-analysis. Keep annotating even when numbers look good.",
     },
   },
